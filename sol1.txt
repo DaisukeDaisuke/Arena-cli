@@ -1,0 +1,920 @@
+# Ghidra-MCP用 闘技場CLIゲーム 仕様書・訂正版
+
+## 1. 目的
+
+GPT-6に小型のC++ CLIゲームを実装させ、GitHub Actions上のMSVC Releaseビルドで生成したPEを、ソースコードを見ずにGhidra-MCPから解析する。
+解析対象は単純なif文や1個のフラグではなく、UI、入力補完、複数translation unit、非キャプチャλ、ジャンプテーブル、Skillデータ、Effect interpreter、AI Rule、ルート分岐、戦闘履歴を横断しないと全体像が分からない構造とする。
+ゲームそのものは解析なしでも十分遊べ、普通に優勝可能とする。
+一方で解析すると、敵の行動原理、Skill間の相互作用、隠れた入力仕様、優勝判定の実装不整合まで理解でき、通常プレイとは異なる攻略も成立する。
+
+## 2. 舞台
+
+舞台は地下闘技場。
+プレイヤーは分岐する対戦ルートを選びながら複数の敵と戦い、最終的な優勝を目指す。
+敵は10種類程度用意し、1プレイでは4～5体程度と戦う。
+
+```text
+VOID PIT
+BRACKET OPEN
+5 MATCHES TO THE TITLE
+PRIZE: 10,000 G
+```
+
+長いストーリーや会話は入れない。
+ゲームそのもののルート、技習得、対戦相手の組み合わせがプレイごとの差になる。
+
+## 3. 画面
+
+ASCII/TUIをゲームの顔として維持する。
+
+```text
+┌──────────────────────────────┐
+│        VOID KNIGHT           │
+│                              │
+│        ▄██████▄              │
+│       ██ ▄  ▄ ██             │
+│       ██  ██  ██             │
+│        ████████              │
+│                              │
+│ Enemy HP: ███████░░ 72/100   │
+│ You   HP: █████░░░░ 48/80    │
+│ MP:       ███░░░░░░ 12/30    │
+└──────────────────────────────┘
+> fi
+  fire
+  first-aid
+```
+
+UIには次を含める。
+
+* ANSI 24-bit color
+* カーソル移動
+* 敵ドット絵
+* HP/MPバー
+* Status表示
+* Battle log
+* トーナメントルート表示
+* 入力中のautocomplete
+* コマンド履歴
+* Backspace
+* Enter
+  敵画像は8×8～16×16程度のpalette spriteとして保持し、sprite decoderから`▀`のforeground/backgroundへ展開する。
+  UI側には例えば次の処理を持たせる。
+
+```text
+decodeSprite()
+emitAnsiRgb()
+drawSprite()
+drawGauge()
+drawStatus()
+renderBattleLog()
+renderRoute()
+updateSuggestions()
+pushCommandHistory()
+readLineEditor()
+```
+
+これらは逆コンパイル時には存在感があるが、攻略ロジックそのものではない。
+Ghidra-MCPには最初に、このUI系とゲーム系を分類させる。
+
+## 4. トーナメント
+
+一本道ではなく、途中で次の対戦相手を選択できる。
+概念例:
+
+```text
+                    START
+                  /       \
+           IRON HOUND     HEX MAGE
+            /     \        /     \
+        GOLEM    WISP   SHADE    MONK
+           \      |       |      /
+             BLADE DANCER
+                   |
+              VOID KNIGHT
+```
+
+敵タイプは10種類程度。
+例:
+
+```text
+IRON HOUND
+HEX MAGE
+STONE GOLEM
+ASH WISP
+SHADE
+IRON MONK
+BONE ARCHER
+FROST WITCH
+BLADE DANCER
+VOID KNIGHT
+```
+
+1プレイですべての敵とは戦わない。
+どの敵と戦うかによって、途中で習得できるSkillも変化する。
+これにより、何度遊んでも別のSkill構成と攻略が成立する。
+
+## 5. 戦闘テンポ
+
+敵1体は2～5turn程度で倒せる。
+プレイヤー側も数回大きな攻撃を受ければ倒れる。
+HPが0になれば即ゲームオーバー。
+ダメージには乱数を使用しない。
+同じstateと同じ入力からは必ず同じ結果になる。
+これにより解析したダメージ式やSkill相互作用を、そのまま実プレイで検証できる。
+
+## 6. Skill Slot
+
+プレイヤーと敵は共通のSkillシステムを使用する。
+各Characterは3つ程度のSkill Slotを持つ。
+
+```cpp
+struct Fighter {
+    int hp;
+    int mp;
+    SkillId skills[3];
+    StatusState status;
+};
+```
+
+敵ごとに別戦闘コードを作るのではなく、EnemyDefからSkill Slotを与える。
+
+```text
+IRON HOUND
+  bite
+  rush
+  focus
+HEX MAGE
+  fire
+  drain
+  barrier
+STONE GOLEM
+  smash
+  guard
+  quake
+```
+
+## 7. Skillを豊富にする
+
+「Fireを解析したらSkill解析終了」にはしない。
+Skillは15～20種類程度用意し、それぞれがEffectの組み合わせとして実装される。
+単純な威力違いだけにはしない。
+例えば次のようなカテゴリを持つ。
+
+### 直接攻撃
+
+```text
+attack
+通常物理攻撃
+smash
+高威力、Guardに弱い
+pierce
+低威力だがGuardを無視
+fire
+魔法Damage
+quake
+複数のStatusを解除して大Damage
+```
+
+### 状態操作
+
+```text
+focus
+次の攻撃系Effectを2倍
+guard
+次のDamageを軽減
+barrier
+魔法Damageを軽減
+freeze
+相手の次行動へ制約
+burn
+数turn継続する固定Damage
+```
+
+### HP操作
+
+```text
+first-aid
+自分を回復
+drain
+相手へDamageを与え、同値または一部を回復
+lifebloom
+即時回復は弱いが次turnにも回復
+```
+
+### 状態との相互作用
+
+```text
+break
+Damage＋Guard解除
+shatter
+Freeze中なら追加Damage
+flare
+Burn中なら追加Damage
+counter
+相手がFocus中なら高威力
+purge
+Statusを消す代わりにDamage
+```
+
+Skillごとに専用関数を大量に作らず、Effectの組み合わせで表現する。
+そのため、解析者がEffect opcodeを理解すると複数Skillの意味を少しずつ読めるようになるが、Skillごとの組み合わせを復元しないと完全な攻略情報にはならない。
+
+## 8. SkillDef
+
+```cpp
+struct Effect {
+    EffectOpcode opcode;
+    int arg0;
+    int arg1;
+};
+struct SkillDef {
+    const char* name;
+    int cost;
+    Effect effects[3];
+};
+```
+
+例:
+
+```text
+FIRE
+  DAMAGE FIRE 18
+  APPLY BURN 2
+BREAK
+  DAMAGE PHYSICAL 12
+  REMOVE GUARD
+DRAIN
+  DAMAGE DARK 10
+  HEAL_FROM_LAST_DAMAGE 50%
+SHATTER
+  DAMAGE PHYSICAL 8
+  BONUS_IF_STATUS FROZEN 18
+FOCUS
+  APPLY CHARGED 1
+```
+
+Skill同士の相互作用があるため、単一Skillの数値を読むだけでは攻略は完成しない。
+
+## 9. Effect処理は複数translation unit＋λ＋ジャンプテーブル
+
+Effect Opcodeごとの処理は巨大なswitchへまとめない。
+複数translation unitへ分散した非キャプチャλとして実装し、それらを関数ポインタのジャンプテーブルから呼ぶ。
+
+```cpp
+using EffectFn = void(*)(BattleContext&, const Effect&);
+```
+
+例:
+
+```text
+effects_damage.cpp
+effects_status.cpp
+effects_heal.cpp
+effects_conditional.cpp
+effects_misc.cpp
+```
+
+各translation unitに、
+
+```cpp
+static constexpr EffectFn damageEffect =
+    +[](BattleContext& ctx, const Effect& effect) {
+        // ...
+    };
+```
+
+のような実装を置く。
+別translation unitでdispatch tableを構築する。
+
+```cpp
+const std::array<EffectFn, EFFECT_COUNT> effectJumpTable = {
+    getDamageEffect(),
+    getHealEffect(),
+    getApplyStatusEffect(),
+    getRemoveStatusEffect(),
+    getConditionalBonusEffect(),
+    getModifyGaugeEffect(),
+};
+```
+
+実行は、
+
+```cpp
+effectJumpTable[effect.opcode](ctx, effect);
+```
+
+とする。
+したがって解析では、
+
+```text
+SkillDef
+↓
+Effect[]
+↓
+EffectOpcode
+↓
+effectJumpTable
+↓
+関数ポインタ
+↓
+別translation unit由来のλ
+```
+
+を復元する必要がある。
+
+## 10. AIもデータ駆動
+
+敵AIも専用if文の集合にはしない。
+
+```cpp
+struct AiRule {
+    ConditionId condition;
+    int threshold;
+    int actionSlot;
+};
+```
+
+例えば、
+
+```text
+HEX MAGE
+self HP <= 20      -> drain
+player Burned      -> flare
+otherwise          -> fire
+IRON MONK
+player Focused     -> guard
+self HP <= 30      -> counter
+otherwise          -> attack
+```
+
+Conditionもジャンプテーブルでdispatchする。
+
+```cpp
+using ConditionFn = bool(*)(const BattleContext&, int);
+```
+
+解析者が敵AIを理解するには、
+
+```text
+EnemyDef
+↓
+AiProfile
+↓
+AiRule
+↓
+ConditionId
+↓
+conditionJumpTable
+↓
+Condition λ
+↓
+actionSlot
+↓
+SkillId
+↓
+SkillDef
+```
+
+まで対応付ける必要がある。
+
+## 11. Skill習得スポット
+
+敵を倒すたびに必ずSkillを得る形式にはしない。
+トーナメント途中にSkill習得スポットを置く。
+例えば、
+
+```text
+TECHNIQUE BOOTH
+Choose one recorded technique:
+> drain
+  barrier
+  smash
+```
+
+その時点までに遭遇した敵やルートによって、選択肢が変化する。
+闘技場では対戦データから技を再現して正式登録できる、程度の自然なゲームルールとする。
+これには重要な役割がある。
+プレイヤーはゲームを普通に遊んでいるだけでも、
+
+```text
+敵が使っていたdrain
+↓
+後のスポットでは自分の技として取得できる
+```
+
+という経験をする。
+つまり「敵とプレイヤーの技は完全に別物ではなく、同じSkillとして扱われているらしい」というヒントが、ゲームそのものから自然に与えられる。
+そのため解析時にEnemy SkillとPlayer Skillが同じSkillDefを参照していることが判明すると、
+
+```text
+もしかして、取得する前でも名前を直接入力すれば使えるのでは？
+```
+
+という発想へ自然につながる。
+
+## 12. Autocomplete
+
+Autocompleteへ表示するSkillは現在のPlayer Skill Slotだけ。
+
+```text
+> fi
+  fire
+  first-aid
+```
+
+敵技や未習得技は候補に出ない。
+ただし入力parserはログ表示などでも利用する共通Skill name resolverを再利用している。
+
+```cpp
+SkillId id = resolveSkillName(input);
+if (id != InvalidSkill) {
+    executeSkill(player, enemy, id);
+}
+```
+
+本来必要なPlayer Skill Slot所有確認がない。
+したがって、敵が使用したSkillの名前を完全に覚えていれば、
+
+```text
+HEX MAGE used DRAIN.
+...
+> drain
+```
+
+と直接入力できる。
+これは秘密コマンドではない。
+敵SkillとPlayer Skillの共通化、戦闘ログ用name resolver、入力parserの再利用が重なって生じた実装バグとする。
+
+## 13. 直近6コマンド履歴
+
+ゲームは直近6回のPlayer Commandを保持する。
+
+```cpp
+struct CommandHistory {
+    CommandEntry entries[6];
+    int cursor;
+};
+```
+
+これは本来、不正検出のためのデータではない。
+主目的はUIである。
+Line editorやautocompleteで、最近使用したSkillを候補上位へ出したり、再入力を補助したりするために利用する。
+例えば、
+
+```text
+RECENT
+  fire
+  guard
+  first-aid
+```
+
+のように直近操作が補完順位へ影響する。
+7件目のコマンドを入力すると最古の1件が消える固定長ring bufferとする。
+
+## 14. 未習得Skillも履歴には普通に残る
+
+Parserは未習得Skillも実行できるため、そのSkillも通常Skillと同じCommandHistoryへ記録される。
+例えば、
+
+```text
+1 attack
+2 guard
+3 drain      ← 未習得
+4 fire
+5 first-aid
+6 attack
+```
+
+となる。
+この時点では`drain`が履歴に残っている。
+UIから履歴を見ることができるため、プレイヤーは解析なしでも「最近使ったコマンドが6件しか保持されず、古いものから消える」ことを普通のゲーム仕様として知ることができる。
+さらに通常プレイを続けて、
+
+```text
+7 guard
+8 fire
+9 attack
+...
+```
+
+と入力すれば、やがて`drain`は履歴から消える。
+つまり「6個しか残らない」という性質そのものは隠し仕様にしない。
+
+## 15. 優勝判定の実装バグ
+
+大会側では独立した完全なSkill使用記録を持たない。
+実装者が既存のCommandHistoryを使い回し、優勝時に直近6Commandだけを検査する。
+概念的には、
+
+```cpp
+for (const auto& command : history.entries) {
+    if (!isRegisteredSkill(command.skillId, player)) {
+        suspicious = true;
+    }
+}
+```
+
+となっている。
+つまり大会全体の使用履歴を監査しているように見えるが、実際に調べているのはautocomplete用ring bufferに現在残っている6件だけである。
+未習得Skillを一度でも使用した事実そのものは保存されない。
+したがって、
+
+```text
+未習得drainを使用
+↓
+戦闘を続ける
+↓
+正規Skillを6回以上使用
+↓
+drainがCommandHistoryから押し出される
+↓
+優勝
+```
+
+とすると、優勝判定時には不正Skill使用を確認できない。
+専用のログ削除機能や証拠隠滅コマンドは存在しない。
+普通のautocomplete履歴の寿命と、それを監査にも流用した設計ミスだけで成立する。
+
+## 16. この仕様を通常プレイから推測できるようにする
+
+CommandHistoryは完全な内部データにはしない。
+最近使用したSkillがautocomplete上位に現れ、使わなくなると数Command後に消える。
+例えば、
+
+```text
+> f
+  fire
+  focus
+```
+
+だったものが、直近使用状況によって、
+
+```text
+> f
+  focus
+  fire
+```
+
+のように順位変化してもよい。
+これにより普通に遊んでいるプレイヤーでも、
+「最近使ったコマンドだけ覚えている」
+「かなり前のものは忘れる」
+という挙動には気付ける。
+Ghidra解析で`CommandHistory[6]`と優勝時の参照先を結び付けた瞬間、
+
+```text
+あのautocomplete履歴を、そのまま不正判定にも使っているのでは？
+```
+
+という発見につながる。
+
+## 17. エンディング
+
+エンディングは露骨に、
+
+```text
+CHEATER DETECTED
+YOU LOSE
+```
+
+とは表示しない。
+両方とも一見すると普通にゲームをクリアしたように見せる。
+また両方でスコアを表示する。
+
+### 通常エンディング
+
+優勝時の直近6Commandに未登録Skillが含まれている場合。
+
+```text
+VOID PIT — FINAL RESULT
+CHAMPION
+SCORE          8420
+MAX DAMAGE       38
+DAMAGE TAKEN     71
+ROUNDS             5
+RANK               A
+PRIZE          2500 G
+The season is over.
+```
+
+普通にゲームを終えたように見える。
+明示的に「不正がバレた」とは書かない。
+ただし賞金、演出、最後の短い文章などが真エンディングと異なる。
+
+### 真エンディング
+
+優勝時の直近6Commandがすべて現在許可されたSkillの場合。
+
+```text
+VOID PIT — FINAL RESULT
+CHAMPION
+SCORE          8420
+MAX DAMAGE       38
+DAMAGE TAKEN     71
+ROUNDS             5
+RANK               A
+PRIZE         10000 G
+TITLE: VOID CROWN
+```
+
+こちらも同じスコアを表示する。
+違いは結果処理と報酬だけ。
+解析せず正攻法で勝った場合も当然こちらへ到達できる。
+つまり真エンディングは「チートを使った人専用」ではない。
+正攻法なら普通に到達する。
+解析して未習得Skillを使った場合でも、最後の6Commandからその痕跡を押し出せば同じ真エンディングへ到達できる。
+
+## 18. 通常プレイとしてのリプレイ性
+
+解析要素だけを目的にゲームを設計しない。
+普通に何度か遊びたくなる程度の組み合わせを持たせる。
+主な変化要素は、
+
+* 分岐する敵ルート
+* 10種類程度の敵
+* 各敵3Skill
+* 15～20種類程度の共通Skill
+* Skill習得スポット
+* 3Slot制による取捨選択
+* Skill同士の相互作用
+* 敵AIとStatusの組み合わせ
+  とする。
+  例えば1プレイ目は、
+
+```text
+fire
+focus
+first-aid
+```
+
+中心。
+別プレイでは、
+
+```text
+drain
+barrier
+shatter
+```
+
+中心。
+さらに別プレイでは、
+
+```text
+pierce
+burn
+flare
+```
+
+中心、といった構成が成立する。
+単純に強いSkillを1個見つければゲーム終了にはしない。
+
+## 19. 解析するほどSkillの見え方が変わる
+
+Ghidra-MCPで最初に`DAMAGE` Effectを1個見つけても、それだけでは攻略は完成しない。
+次に、
+
+```text
+APPLY STATUS
+REMOVE STATUS
+BONUS IF STATUS
+HEAL FROM DAMAGE
+IGNORE GUARD
+MODIFY NEXT DAMAGE
+```
+
+などのEffect λを復元することで、Skill同士の関係が少しずつ見えてくる。
+例えば、
+
+```text
+freeze
+↓
+shatterの追加Damage条件
+```
+
+```text
+burn
+↓
+flareの追加Damage条件
+```
+
+```text
+focus
+↓
+攻撃Effectの倍率変更
+```
+
+```text
+guard
+↓
+breakで解除
+```
+
+という関係が分かる。
+「このSkillは20Damage」で終わらず、Effect engineそのものを理解するほど攻略の選択肢が増える構成とする。
+
+## 20. 複数translation unit
+
+1ファイル完結は廃止する。
+ただし大規模プロジェクトにはしない。
+概ね次の程度とする。
+
+```text
+main.cpp
+game_types.h
+ui.cpp
+sprite.cpp
+input.cpp
+command_history.cpp
+battle.cpp
+skills.cpp
+effects_damage.cpp
+effects_status.cpp
+effects_heal.cpp
+effects_conditional.cpp
+effect_dispatch.cpp
+ai.cpp
+ai_conditions.cpp
+enemy_data.cpp
+tournament.cpp
+rewards.cpp
+result.cpp
+```
+
+Effect λやCondition λは複数ファイルへ分散し、別translation unitのdispatch tableから参照する。
+MSVC ReleaseビルドではPDBを解析対象へ渡さない。
+
+## 21. Ghidra-MCPでの解析順
+
+最初から「チート方法を探せ」とは依頼しない。
+まず内部設計を復元する。
+
+```text
+PEをGhidraへ投入
+↓
+UI処理とゲームロジックを分類
+↓
+sprite / ANSI / line editor / autocompleteを特定
+↓
+Battle loopを特定
+↓
+SkillDefを復元
+↓
+EffectOpcodeを復元
+↓
+effectJumpTableを発見
+↓
+複数translation unit由来のλを対応付け
+↓
+Skill間の相互作用を理解
+↓
+EnemyDefとAI Ruleを復元
+↓
+conditionJumpTableを解析
+↓
+敵ごとの攻略法を理解
+↓
+実際にゲームを攻略
+```
+
+その後、入力系を解析する。
+
+```text
+autocomplete
+↓
+Player Skill Slotだけ参照
+command parser
+↓
+global Skill resolverを参照
+↓
+Enemy Skillも名前入力なら実行可能
+```
+
+実際に敵が使ったSkillを入力する。
+
+```text
+HEX MAGE used DRAIN.
+...
+> drain
+You used DRAIN.
+```
+
+ここで一度ゲームを最後まで進めると通常エンディングになる。
+その後Result処理を解析する。
+
+```text
+final result
+↓
+illegal Skill検査
+↓
+参照しているのは完全な大会履歴ではない
+↓
+CommandHistory
+↓
+6-entry ring buffer
+↓
+autocompleteでも使用
+```
+
+ここで初めて、最近6Commandから押し出せば痕跡がなくなることを理解する。
+最後に実プレイで、
+
+```text
+未習得Skillを利用
+↓
+必要な戦闘を有利に進める
+↓
+最後に正規Skillを6回以上使用
+↓
+CommandHistoryから未習得Skillが消える
+↓
+優勝
+↓
+真エンディング
+```
+
+まで確認する。
+
+## 22. 解析対象としての核心
+
+この題材では、単一のバグや単一の関数を見つければ終わりにはしない。
+理解すべき対象は、
+
+```text
+UI subsystem
+sprite decoder
+line editor
+autocomplete
+6-entry CommandHistory
+global Skill resolver
+Player Skill Slot
+Enemy Skill Slot
+Skill database
+Effect interpreter
+Effect jump table
+Effect λ
+Status interaction
+Enemy database
+AI Rule
+Condition jump table
+Condition λ
+Tournament graph
+Skill acquisition
+Final result logic
+```
+
+に分散する。
+特に最終的な抜け道は二つの独立した設計上の不整合を組み合わせる。
+
+```text
+Enemy SkillをPlayerから実行できる
++
+監査がautocomplete用の直近6Commandしか見ていない
+```
+
+どちらも単独では単純だが、それらがUI、ゲームロジック、共通Skill engine、大会結果処理を横断して接続されている点をGhidra-MCPの解析題材とする。
+
+## 23. 最終的なゲーム体験
+
+ゲームは解析用のパズルではない。
+普通に遊んでも、
+
+```text
+敵を選ぶ
+↓
+短い戦闘をする
+↓
+Skillの相互作用を覚える
+↓
+途中で新しいSkillを取得する
+↓
+別のルートへ行く
+↓
+自分なりの3Skill構成を作る
+↓
+優勝する
+```
+
+という小型ゲームとして成立させる。
+その上で解析すると、
+
+```text
+敵も同じSkill engineを使っている
+↓
+Skill Effectの内部仕様が分かる
+↓
+敵AIまで読める
+↓
+敵が見せたSkillを取得前に試せることに気付く
+↓
+しかし通常エンディングになる
+↓
+autocomplete履歴と結果判定が同じ6-entry bufferを参照していることに気付く
+↓
+痕跡が自然に消えるまで正規Commandを使う
+↓
+真エンディング
+```
+
+という、もう一つの攻略ルートが成立する。
+目的は「秘密文字列を発見する」ことではなく、**複数のサブシステムを復元した結果、それぞれ別用途に作られた仕組みの接続ミスまで理解できるゲームバイナリを作ること**とする。
