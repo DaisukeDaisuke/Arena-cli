@@ -24,31 +24,21 @@
 | 規模 | 共通技20種、敵10種、基本コマンド3種、装備技3枠、5戦、習得所2回 |
 | 入力 | 標準版はgetlineによる1行入力。入力中補完・矢印履歴・自前Backspace処理は削除 |
 | 補完 | `skills`、`recent`、`? fi`をEnterで実行。補完結果から自動実行しない |
-| 乱数 | 開始時の技構成だけ。戦闘中のダメージ・AI・命中に乱数なし |
+| 乱数 | 最大周期64bit LCGの上位32bitを百分率0〜99へ変換。開始時に初期技・敵配置・敵3枠を決定。戦闘中のダメージ・AI・命中に乱数なし |
 | 大技 | 溜め→自動発動→自動休息の3ラウンド。敵味方で同じ制約 |
 | 解析構造 | 小さなデータ表、共通予約、Effect dispatch、AI rule、履歴監査。無意味な分割はしない |
 | 結果 | 通常優勝と金冠優勝。金冠は「大会の正規判定通過」であり完全な不正証明ではない |
 | 絵 | 本書でピクセル原稿・色・ASCII代替を固定。外部画像不要 |
 
-カード、デッキ、マップ生成、レア度、装備品、成長木、会話分岐は導入しない。次技予告だけに個性を依存せず、「同じ技の予約を敵味方で共有する」ことを核にする。
+カード、デッキ、レア度、成長木、会話分岐は導入しない。装備品は戦闘報酬で購入する少数の固定商品とする。次技予告だけに個性を依存せず、「同じ技の予約を敵味方で共有する」ことを核にする。
 
-## 3. 公開仕様と非公開技の扱い
+## 3. オープンな設計書とプレイヤー説明書
 
-「仕様書全文を先に公開する」と「その仕様書に書いた技を秘密にする」は両立しない。秘密性は暗号や難読化で補わない。
+本書とソースはオープンソースとして全文公開する。作者用の非公開付録は設けず、特殊技・監査も本文の設計として扱う。ゲーム内の未発見表示は遊びの進行であり、設計書のアクセス制限ではない。
 
-公開時は次の単位に分ける。
+別途、人間向けの日本語説明書 `MANUAL-ja.md` とゲーム内`help`を作る。操作、画面の読み方、登録技の確認、購入、終了・中断を説明し、大技の正体・特殊技の取得手順・エンディング分岐・監査条件は書かない。原稿を本書末尾に示す。英語の読み解きを操作の必須条件にしない。
 
-| 配布物 | 公開タイミング・内容 |
-|---|---|
-| プレイヤー仕様 | 本書の本文。基本操作、通常技、予告、溜め、ルート、OSC、対応端末 |
-| 作者用付録A | 特殊技の名前、条件、内部処理、再現手順。解析記事のネタバレ部分として後日公開 |
-| 作者用付録B | 意図した入力・監査の不整合と検証条件。同じく後日公開 |
-| 解析対象 | ネイティブRelease実行ファイル。対応するソース・PDBは解析者へ先に渡さない |
-| 検証用ソース | 記事の検証完了後に同じ版を公開可能 |
-
-本書そのものは作者用の完全版なので、全文公開すれば答えも公開される。Qiitaのdetailsは閲覧上の配慮でありアクセス制御ではない。公開前に付録を別記事へ分ける。
-
-ゲーム内の非公開技は「未発見中はhelp・補完・習得候補に出さない」という意味。正規の発見経路と実行経路を必ず持つ。対戦相手のログに現れた通常技は秘密扱いしない。
+解析記事の実験では、公開済みであってもモデルへソースや本書の答えを渡さず、対象exeだけを渡す条件を明記する。公開の遅延や秘密保持を前提にしない。
 
 ## 4. 画面とアートディレクション
 
@@ -66,7 +56,7 @@
 
 ```text
 +--------------------------------------------------------------------------+
-| VOID PIT / SEED 00000001                    BOUT 5/5 : THE EMPTY THRONE   |
+| VOID PIT / RANDOM RUN                      BOUT 5/5 : THE EMPTY THRONE   |
 |                                                                          |
 |       /\       /\              VOID KNIGHT                                |
 |      /##\_____/##\             HP [##############] 84/84                  |
@@ -74,37 +64,54 @@
 |      |## /==\ ##|              THEN : RELEASE 48 -> REST                   |
 |       \#|####|#/              No damage this round.                       |
 |        /|####|\                                                           |
-|       /_|_||_|_\              YOU  HP 96/96  MP 32/32                     |
-|         /_\/_\                FOCUS -  BANK 0/12  PENDING -               |
+|       /_|_||_|_\              YOU HP [##############] 96/96               |
+|         /_\/_\                   MP [##############] 32/32               |
+|                               SPD 100  GOLD 0  FOCUS -  BANK 0/12        |
 |                                                                          |
 | [1] fire 3MP  [2] focus 4MP  [3] drain 4MP                                  |
-| attack / guard / wait / skills / recent / ? prefix / quit                  |
+| attack / guard / wait / skills / book / status / help / quit              |
 | LOG: The throne has no owner.                                             |
 +--------------------------------------------------------------------------+
 > guard
 ```
 
-数値ゲージは長さ14、充填=floor(14*current/max)。0は全空、最大は全充填。ログは直近4イベント、長いイベントは74文字以内の短文へ整形する。ゲーム内文字列はASCII、ドット描画用の`▀`だけUTF-8。色がなくてもNEXT、CHARGE、RELEASE、RESTと数字で判別できる。
+数値ゲージは敵HP・味方HP/MPすべて長さ14、充填=floor(14*current/max)。0は全空、最大は全充填。ログは直近4イベント、長いイベントは表示幅74列以内の短文へ整形する。機械用入力名はASCII、画面説明とhelpはUTF-8日本語。固定枠の英語ラベルには日本語の凡例を付け、説明文は枠外へ出して全角による罫線ずれを避ける。色がなくてもラベルと数字で判別できる。
+
+Windows Terminal向け`status`は下記構成。HPは緑（残量25%以下は赤）、MPは青、SPDはシアン、Goldは金、状態異常は赤、装備見出しは紫、枠は暗い青灰。白は通常説明だけに使い、視線の行き先を分ける。
+
+```text
++----------------------- FIGHTER STATUS -----------------------+
+| HP   [##########----] 100/128    MP [########------] 20/32     |
+| SPD   80   ORDER: ENEMY > YOU    GOLD 60                     |
+| FOCUS -     BURN -     BANK [#######-------] 6/12             |
+| ARMOR iron-coat                 CHARM none                   |
++-------------------------------------------------------------+
+HP: 体力 / MP: 技の力 / SPD: 素早さ / GOLD: 所持金
+防具: 鉄の外套（最大HP+32、素早さ-20） / 装飾: なし
+book: 覚えた技一覧 / skills: 今使える技 / back: 戻る
+```
+
+ゲージ例も式に従い100/128=10個、20/32=8個、6/12=7個充填。SPDは最大値のある資源ではないので数字と行動順で示す。
 
 ## 5. 1ラウンドの厳密な順序
 
-ターンという言葉の曖昧さを避け、両者の行動機会1回ずつを「ラウンド」と呼ぶ。双方常にプレイヤー側が先。速度・命中・クリティカルなし。
+ターンという言葉の曖昧さを避け、両者の行動機会1回ずつを「ラウンド」と呼ぶ。ラウンド開始時のSPDが高い側から行動し、同値はプレイヤー先。SPD0でも行動は失わない。命中・クリティカル・速度乱数なし。行動順を`YOU > ENEMY`または`ENEMY > YOU`で予告する。
 
 1. 敵の行動を確定し、そのSkillIdと段階を予告する。予約発動・休息が最優先。通常時はAI表の最初の成立行。MP不足の候補は飛ばす。通常行動のMPは実行時に支払う。
 2. プレイヤーが情報コマンドを何回でも利用できる。無効入力、使用条件不成立、MP不足は時間も履歴も消費しない。敵の予告も変わらない。
-3. プレイヤー行動を解決する。予約発動・休息のラウンドは`next`で進める。ほかの戦闘技は受付不可。`quit`と情報表示は利用可能。
-4. HPが0になった瞬間に死亡判定。敵死亡ならその敵の予約・行動・継続ダメージを破棄して勝利。プレイヤー死亡なら即終了。
-5. 生存していれば敵の確定済み行動を解決する。プレイヤー入力に反応した再選択はしない。条件付き技の追加威力は実行時の状態から算出する。
+3. プレイヤーの入力を確定する。MP・固有条件はこの時点で検査し、受理した手動技のMPを支払い履歴へ追加する。予約発動・休息のラウンドは`next`で進める。ほかの戦闘技は受付不可。`quit`と情報表示は利用可能。双方のguard/barrierだけは行動順に先立つ構えとしてこの時点で付与する。MP回復は自分の行動機会で行う。
+4. HPが0になった瞬間に死亡判定。敵死亡ならその敵の予約・行動・継続ダメージを破棄して勝利。プレイヤー死亡なら即終了。ただしDrainの攻撃に内包する吸収回復は、確定した実減少を使って解決してから勝利を確定する（7.1節）。
+5. 確定したSPD順に双方の行動を解決し、各効果直後に4の死亡判定を行う。プレイヤー入力に反応した敵の再選択はしない。条件付き技の追加威力は実行時の状態から算出する。先手が倒せば後手の行動は消滅するが、受理済み入力のMP・履歴は戻さない。
 6. 両者のBurnをプレイヤー、敵の順に処理し、各減算直後に死亡判定。双方を同時に減らす処理はしない。
 7. ラウンド限定防御を解除し、次のラウンドへ。20ラウンド終了しても敵が生存なら時間切れ敗退。
 
-`guard`と`barrier`は使用したラウンド終了まで有効。敵が使う際も同じで、先に受けた攻撃へ遡及しない。敵の防御技は基本セットから外し、通常プレイヤー習得用とする。この非対称な行動順で無意味な敵防御を連打させない。
+`guard`と`barrier`は構えの確定からそのラウンド終了まで有効。遅い側も予告へ防御を合わせられる。技の追加効果で途中付与した状態は過去の攻撃へ遡及しない。素早さは先に倒す・回復する・集中を消す場面で効き、防御を無意味にしない。
 
 大技はラウンドTでMP支払い・予約作成、T+1で自動発動、T+2で休息、T+3から選択自由。溜めも休息も通常攻撃を併用できない。MPは発動・休息時に追加消費しない。対象死亡、戦闘終了で予約は消滅し、次戦に休息を持ち越さない。
 
 ## 6. 数値と状態
 
-プレイヤー最大HP96、最大MP32。新規開始時は満タン。試合後にHP24・MP12回復、上限まで。集中・Burn・予約・防御蓄積は試合後に消す。最大HP・最大MPは変化しない。
+プレイヤー基礎最大HP96、最大MP32、SPD100。新規開始時は満タン、Gold0。試合後にHP24・MP12回復、上限まで。集中・Burn・予約・防御蓄積は試合後に消す。装備により最大HP・最大MP・SPDが変化する（9.1節）。攻撃力・防御力の別ステータスは増やさず、技の数式を読みやすく保つ。
 
 | 状態 | 上限・期限・動作 |
 |---|---|
@@ -142,7 +149,7 @@
 | 5 | fire | 3 | 魔法12、Burn付与 |
 | 6 | flare | 4 | 魔法12、対象Burn中なら+14。Burnを解除しない |
 | 7 | drain | 4 | 魔法14、実減少の1/2を回復 |
-| 8 | first-aid | 6 | HP24回復 |
+| 8 | healing-rain | 4 | 癒しの雨。使用者HP12、相手HP6（12/2）を回復 |
 | 9 | focus | 4 | Focus付与。既にあるときは無効入力 |
 | 10 | barrier | 3 | Barrier |
 | 11 | purge | 3 | 魔法10、対象のFocusとBurnを解除 |
@@ -153,13 +160,44 @@
 | 16 | quake | 6 | 溜め大技、物理36、発動後休息 |
 | 17 | eclipse | 8 | 溜め大技、魔法48、発動後休息 |
 | 18 | feint | 2 | 物理8、自分Focus付与。既存Focusは攻撃に消費してから再付与 |
-| 19 | 付録Aの特殊技 | 10 | 公開前はこの行を「発見技1種」に置換。敵の予約を利用する溜め技 |
+| 19 | reprise | 10 | 敵の予約を利用する溜め技。公開設計は18節 |
 
-`counter`の「溜め予約中」は相手が大技開始済みで、まだ発動していない期間。予告がCHARGEでも開始前には成立しない。予告がRELEASEならプレイヤーの行動時点では成立する。
+`counter`の「溜め予約中」は相手が大技開始済みで、まだ発動していない期間。予告がCHARGEでも開始前には成立しない。RELEASEでも相手がSPDで先に発動した後なら追加威力は付かない。repriseは入力確定時の予約を捕捉するため、この差があることを発見後の技説明に明記する。
 
 物理・魔法は防御と演出の違いに限定。炎耐性など敵ごとの倍率表は設けない。freeze/shatter、複数属性、複雑な状態解除順は初版から除外する。
 
-## 8. 開始時の技抽選と再現性
+### 7.1 全20技の数式とEffect列
+
+u=使用者、v=相手、I(条件)=成立なら1、非成立なら0。`F(x)=floor(x*(u.Focus ? 3 : 2)/2)`。`D(x,P/M,ignore)`はF(x)を計算後、魔法かつBarrierなら0、そうでなくGuardかつignore=falseならfloor(F(x)/2)、残りはF(x)。実減少d=min(v.hp,D)。直接攻撃でu.Focusを消費し、Guardの蓄積はmin(12,旧Bank+F(x)-D)（Barrier優先時は蓄積0）。`H(t,x)=min(t.maxHP,t.hp+x)`、`M(t,x)=min(t.maxMP,t.mp+x)`。対象死亡後の追加効果は停止するが、Drainの使用者回復だけは既に確定したdで実行してから勝利を確定する。
+
+Prepare段階は自分の行動機会に条件加算・Bank消費を行い、Hit段階はダメージ、After段階は回復・状態操作。repriseの相手予約だけは入力確定時に先に捕捉する。Effect配列は各段階の該当要素を左から実行し、表の例外としてguard/barrierのApplyは構え段階。1技最大3Effect、Clearはbitmaskで複数状態を消せる。
+
+| ID / 技 | 完全な計算式（MPは前表） | Effect列 |
+|---|---|---|
+| 0 attack | d=D(12,P,false) | Damage(P,12) |
+| 1 guard | Guard=true、mp=M(u,4) | Apply(Guard); RestoreMP(4) |
+| 2 wait | mp=M(u,6) | RestoreMP(6) |
+| 3 pierce | d=D(14,P,true) | Damage(P,14,IgnoreGuard) |
+| 4 smash | d=D(22-6*I(v.Guard),P,false) | ConditionalAdd(Guard,-6); Damage(P,22) |
+| 5 fire | d=D(12,M,false)、生存v.Burn=2 | Damage(M,12); Apply(TargetBurn,2) |
+| 6 flare | d=D(12+14*I(v.Burn>0),M,false) | ConditionalAdd(Burn,14); Damage(M,12) |
+| 7 drain | d=D(14,M,false)、u.hp=H(u,floor(d/2)) | Damage(M,14); Drain(1,2) |
+| 8 healing-rain | u.hp=H(u,12)、v.hp=H(v,floor(12/2)) | Heal(Self,12); Heal(Opponent,6) |
+| 9 focus | u.Focus=true、既存Focusなら受付拒否 | Apply(Focus) |
+| 10 barrier | u.Barrier=true | Apply(Barrier) |
+| 11 purge | d=D(10,M,false)、生存vのFocus/Burnを0へ | Damage(M,10); Clear(Target,Focus+Burn) |
+| 12 counter | d=D(10+18*I(v.Pending未発動),P,false) | ConditionalAdd(Pending,18); Damage(P,10) |
+| 13 siphon | d=D(8,M,false)、相手生存時u.mp=M(u,5) | Damage(M,8); RestoreMP(5) |
+| 14 mend | u.hp=H(u,12)、u.Burn=0 | Heal(Self,12); Clear(Self,Burn) |
+| 15 bank-shot | b=u.Bankを捕捉、Bank=0、d=D(14+b,P,false) | SpendBank; Damage(P,14) |
+| 16 quake | T:予約(P,36)、T+1:d=D(36,P,false)、T+2:休息 | Schedule(P,36) |
+| 17 eclipse | T:予約(M,48)、T+1:d=D(48,M,false)、T+2:休息 | Schedule(M,48) |
+| 18 feint | d=D(8,P,false)、相手生存時u.Focus=true | Damage(P,8); Apply(Focus) |
+| 19 reprise | T:入力時の相手予約の威力q/属性kを捕捉、b=u.Bank、Bank=0、予約(k,q+b)。T+1:d=D(q+b,k,false)、T+2:休息 | Borrow; Schedule(Captured) |
+
+表のd=Dという略記は最終的にmin(v.hp,D)へ制限する。HEAL_FROM_DAMAGE以外の回復はFocus倍率を受けない。雨は両者生存中だけ使用でき、相手を復活させない。相手が満タンなら6の超過分は捨てる。雨を予告された側は、そのラウンドに受ける無料回復を見込んで攻める判断ができる。
+
+## 8. 最大周期64bit LCGと開始時抽選
 
 初期3枠は以下の3群から1個ずつ。枠順も攻撃・補助・回復で固定。
 
@@ -167,26 +205,85 @@
 |---|---|
 | 攻撃 | fire / pierce / smash |
 | 補助 | focus / counter / bank-shot |
-| 回復 | first-aid / mend / drain |
+| 回復 | healing-rain / mend / drain |
 
-seedは符号なし32bit、入力は8桁の16進数。既定は00000001。`--seed random`だけ標準random_deviceから値を取得し、必ず実際のseedを表示する。random_deviceの品質・非決定性には依存しない。
+状態はuint64_t。更新は `s = s * 0x5d588b656c078965 + 0x269ec3`。符号なし64bitの自然な折返しを用い、状態周期は2^64。加算定数が奇数、乗数が4で割って1余るため、2の冪を法とする混合LCGの最大周期条件を満たす。seed0も有効。
 
-試合中にPRNGを呼ばない。開始時にLCG `s=(1664525*s+1013904223) mod 2^32`を3回進め、各回`s%3`で候補選択。uint32_tの剰余演算とオーバーフローを仕様化する。剰余偏りはこの小規模抽選では許容。同seed、同コマンド列ならネイティブとWasmで同結果。
+抽選値は必ず `((s >> 32) * 100) >> 32` の0〜99。乗算をuint64_tで行い、更新してから取り出す。`s%100`、`s%2`、下位bitを使う判定は禁止。2択はp<50、3択はp<34 / p<67 / 残り。百分率100通りのため3等分は34/33/33。上位32bitから100通りへの写像にも最大1個分の微小な偏りがある。「完全均等」「予測不可能」とは呼ばない。32bitでの状態更新は採用しないが、2^64の折返し自体は最大周期LCGに必要。
 
-seed=00000001のindexは順に0,0,2となり、fire/focus/drainで開始する。技そのものの威力・名前をランダム変更しない。毎回の解析し直しを要求せず、復元した構造を別の構成へ応用できるようにする。
+初期seed未指定ならネイティブ版はstd::random_deviceから32bitを2回取得して結合。明示指定は`--seed 0123456789abcdef`（16桁hex）でPRACTICE表示とし、通常のRANDOM RUNと記録を分ける。通常runのseedは結果・中断記録で表示し、対戦前には表示しない。どちらもゲーム内の金冠条件は同じで、記事の再現性のためseed指定を残す。
+
+デバイス由来seedで固定の開始列を選ぶ操作は抑えられるが、LCGの予測、再起動による引き直し、メモリー改変、保存データ改変は防げない。C++規格上random_deviceが必ずOSの乱数源を使う保証もないため、配布環境の標準ライブラリでデバイス乱数実装を確認する。取得例外時は開始を中止し、時刻や固定値へ黙ってフォールバックしない。暗号学的な不正防止をうたわない。
+
+### 8.1 lcg.hppの掲載コード
+
+以下を将来の`lcg.hpp`のコードとして採用する。この段階では仕様書内だけに掲載し、実装ファイルは作成しない。Mersenne Twister、uniform_int_distribution、独自の乱数ライブラリは使わない。
+
+```cpp
+#pragma once
+#include <cstdint>
+#include <limits>
+#include <random>
+
+namespace arena {
+class Lcg64 {
+    std::uint64_t state_;
+public:
+    explicit constexpr Lcg64(std::uint64_t seed) noexcept : state_(seed) {}
+
+    constexpr std::uint64_t next() noexcept {
+        state_ = state_ * UINT64_C(0x5d588b656c078965)
+                        + UINT64_C(0x269ec3);
+        return state_;
+    }
+    constexpr std::uint32_t percent() noexcept {
+        const std::uint64_t high = next() >> 32;
+        return static_cast<std::uint32_t>((high * UINT64_C(100)) >> 32);
+    }
+    constexpr std::uint64_t state() const noexcept { return state_; }
+};
+
+// Native adapter only; exceptions are handled by the start screen.
+inline std::uint64_t device_seed() {
+    static_assert(std::numeric_limits<unsigned int>::digits == 32,
+                  "This adapter expects a 32-bit random_device result");
+    std::random_device device;
+    const auto hi = static_cast<std::uint64_t>(device());
+    const auto lo = static_cast<std::uint64_t>(device());
+    return (hi << 32) | lo;
+}
+} // namespace arena
+```
+
+percent()は呼出し1回につき必ず更新1回。N候補からは `index=(percent()*N)/100` を使う（N=1でも1回消費）。N<=10、空候補は設計エラー。候補ID昇順から選択済みを削除して次を引き、重複回避の再抽選はしない。
+
+### 8.2 乱数消費の固定順
+
+run開始時に、初期技3回→敵配置8回→全10ノードの技枠30回、計41回を消費し、選ばない枝も含め大会を確定する。習得所・店・画面再描画・入力時間で追加消費しない。技構成は各枠の候補から1回ずつ引き、候補数1も消費する。技の威力は変動させない。
+
+敵配置は次の手順。各リストはID昇順、選ぶたびにそのリストから除去する。
+
+1. HOUND / HEX / SHADE / MONKからBOUT1の左右を2回で決定。
+2. 残った2体+GOLEM+WISPの4体からBOUT2の左から右4ノードを4回で決定。
+3. ARCHER / WITCHからBOUT3の左右を2回で決定。
+4. BOUT4=DANCER、BOUT5=KNIGHTは固定、配置抽選なし。
+
+全ノードの技枠はBOUT昇順、同層は左から右、slot0→1→2の順。初期技は候補順を7節のID昇順へ並べ替えず、上の3群の記載順を用いる。種別を跨ぐ手動rerollコマンドは設けない。
+
+既知ベクトル：seed=0000000000000001からの更新値は順に`5d588b656c2e2828 / e3b543e45af1de8b / 3d7fca1a0b78ce9a / 3fe714a2cb968b85 / 756b99a0cfd8d73c`、百分率は`36,88,24,24,45`。初期技はpierce / bank-shot / healing-rainになる。これは整数計算で確認した値であり、掲載C++のコンパイル試験とは区別する。
 
 ## 9. 5戦ルートと習得所
 
 ```text
                      ENTRY
                 /             \
-       IRON HOUND               HEX MAGE               [BOUT 1]
+       RANDOM A                 RANDOM B               [BOUT 1]
           /    \                 /    \
-     GOLEM    ASH WISP        SHADE    IRON MONK         [BOUT 2]
+     RANDOM C  RANDOM D      RANDOM E  RANDOM F         [BOUT 2]
           \    /                 \    /
                  TECHNIQUE BOOTH I
                   /             \
-            BONE ARCHER      FROST WITCH               [BOUT 3]
+            RANDOM G        RANDOM H                  [BOUT 3]
                   \             /
                  TECHNIQUE BOOTH II
                     BLADE DANCER                       [BOUT 4]
@@ -195,30 +292,92 @@ seed=00000001のindexは順に0,0,2となり、fire/focus/drainで開始する�
 
 各分岐で敵名、最大HP、3技の名前と短い効果を提示。未発見技は通常のルート候補には含まれない。プレイヤーは装備との相性を判断して選べる。
 
-習得所の候補は「倒した敵の3枠にある通常技の和集合」から基本コマンド・習得済みを除外し、ID昇順。表示されただけで未使用の敵技も学べる。1回につき1個習得して任意の装備枠1個を交換、またはskip。既習得技への装備変更は習得所で何回でも無料。
+図の接続は固定し、名前は8.2節の抽選結果を入れる。初戦後は選んだ側の子2ノードだけ選択可能。BOUT2後に合流し、習得所I→店I→BOUT3を選ぶ。BOUT3後は習得所II→店II→BOUT4→BOUT5。BOUT1/4後には店を置かない。
+
+現在地はシアン`[HERE]`、踏破は緑`[DONE]`、次に選べる地点は琥珀`[1]`/`[2]`、閉じた枝は灰`[LOCK]`。習得所は紫`[LEARN]`、店は金`[SHOP]`。色と文字記号を併用する。選択中は一覧を画面下へ再掲し、矢印キーを必要としない。
+
+```text
+[DONE] BOUT 2 -> [HERE][LEARN] BOOTH I -> [SHOP] -> BOUT 3
+1: BONE ARCHER  HP42 SPD120  pierce / feint / siphon
+2: FROST WITCH  HP42 SPD80   purge / fire / healing-rain
+your command (1 or 2): 1
+```
+
+上は経路と敵候補の表示例。敵選択プロンプトは店を出てBOUT3入口に移動した後に出す。習得所では技候補に1から連番を振り、`0: 習得せず進む`、交換先に`1/2/3`を使う。敵ID・技IDを直接指定する管理入力は公開しない。
+
+習得所の候補は「倒した敵の3枠にある通常技の和集合」から基本コマンド・習得済みを除外し、ID昇順。習得所Iには標準講習のbarrierを追加し、習得所IIには18.1節の実演技を追加する。追加分も習得済みなら除く。これで敵が装備しないbarrierにも正規取得経路がある。表示されただけで未使用の敵技も学べる。1回につき1個習得して任意の装備枠1個を交換、またはskip。既習得技への装備変更は習得所で何回でも無料。
 
 登録済み集合と現在の装備3枠は分離する。一度正規に学んだ技は登録済みのまま。監査は登録済み集合を使うので、以前使った技を外しただけで失格扱いにはならない。正規UIから戦闘中に選べるのは基本3個と現在装備だけ。
 
-## 10. 敵10種の確定データ
+### 9.1 戦闘報酬と装備店
 
-敵MPは最大32・初期32、敵HPは下表。表のAIは上から最初に成立した行。各ラウンド開始時の状態を見る。表の末尾に共通で「attack」を置く。大技の発動・休息はこの表より優先する。
+勝利ごとの獲得GoldはBOUT1=60、2=80、3=100、4=120、5=0。Gold付与→HP/MP回復→習得→店の順。決勝の賞金は結果の別項目で、戦闘前の買物には使えない。店I時点の所持金140、店IIまでの累計240。敵種類で報酬を変えず、弱い敵を倒し直して稼ぐ機能なし。
 
-| 敵 | HP | 3枠 | AI優先順 |
-|---|---:|---|---|
-| IRON HOUND | 36 | pierce / smash / focus | 第1Rはfocus → Focusありsmash → pierce |
-| HEX MAGE | 34 | fire / flare / drain | 自HP<=14ならdrain → 相手Burnならflare → fire |
-| STONE GOLEM | 48 | smash / quake / bank-shot | (R-1)%4=0ならquake → smash |
-| ASH WISP | 36 | fire / flare / mend | 自分Burnならmend → 相手Burnならflare → fire |
-| SHADE | 40 | feint / drain / counter | 相手Pendingならcounter → 自HP<=16ならdrain → feint |
-| IRON MONK | 44 | focus / counter / pierce | 相手Pendingならcounter → Focusなしならfocus → pierce |
-| BONE ARCHER | 42 | pierce / feint / siphon | 自MP<=6ならsiphon → 奇数Rはfeint → pierce |
-| FROST WITCH | 42 | purge / drain / first-aid | 相手Focusならpurge → 自HP<=14ならfirst-aid → drain |
-| BLADE DANCER | 54 | feint / counter / smash | 相手Pendingならcounter → Focusなしならfeint → smash |
-| VOID KNIGHT | 84 | eclipse / purge / siphon | 自MP>=8ならeclipse → siphon |
+装備は「防具1枠」「装飾1枠」。商品は各run1点まで購入できる固定品。初期状態は空。購入品だけ装備可能で、装備変更は店だけ。売却・返金・重複購入なし。技枠と装備枠は別物。
 
-FROST WITCHは名前・氷色の見た目であり、凍結状態は実装しない。VOID KNIGHTのpurge、GOLEMのbank-shotは習得用の実データとして参照されるが、上記AIで実行されない。敵としても全枠を使わせるために不要なAI条件を増やさない。技データ自体は他の正規経路で実行される。
+| 商品ID / 日本語名 | 部位 | 価格 | HPmax (mul/div/add) | MPmax | SPD | 購入可能 |
+|---|---|---:|---|---|---|---|
+| 0 iron-coat / 鉄の外套 | 防具 | 80 | 1/1/+32 | 1/1/+0 | 1/1/-20 | 店I・II |
+| 1 lead-plate / 鉛の鎧 | 防具 | 140 | 1/1/+100 | 1/1/+0 | 0/1/+0 | 店I・II |
+| 2 pilgrim-robe / 巡礼の衣 | 防具 | 100 | 1/1/+12 | 1/1/+16 | 1/1/+0 | 店I・II |
+| 3 wing-boots / 翼の靴 | 装飾 | 100 | 1/1/+0 | 1/1/+0 | 2/1/+0 | 店I・II |
+| 4 mana-ring / 魔力の指輪 | 装飾 | 60 | 1/1/+0 | 1/1/+12 | 1/1/+0 | 店I・II |
+| 5 quick-pin / 先駆けの留め金 | 装飾 | 100 | 1/1/+0 | 1/1/+0 | 1/1/+100 | 店IIのみ |
 
-通常敵は2〜5R、決勝は5〜9Rが目標。回復技を連打する敵も20R上限で終わるが、時間切れを通常攻略の主な敗因にはしない。調整時はHP・コスト・回復量から見直す。
+各ステータスは基礎値から防具→装飾の順に `v=floor(v*mul/div)+add`、最後にHPmax[1,999]、MPmax[0,999]、SPD[0,999]へclampする。mul>=0、div>=1、addは符号付き、演算はint64_t。0倍も特別なifではなく同じ表で表現する。SPD0の鎧+2倍の靴は0のまま、SPD0の鎧+100の留め金は100になる。購入前プレビューで必ず合成後の値を見せる。
+
+最大値が増えた分だけ現在HP/MPも増やし、減るときは新最大へclampする。装備着脱の回復稼ぎを防ぐため、店での装備選択はプレビューだけで、`0: 店を出る`の確定時に入店時の能力から最終構成へ一度だけ適用する。再入店不可。入店時状態を保存し、購入後も基準を更新しない。
+
+```text
+GOLD 140     ARMOR: none     CHARM: none
+1: 鉄の外套      80 G   HP 96 -> 128  MP 32 -> 32  SPD 100 -> 80
+2: 鉛の鎧       140 G   HP 96 -> 196  MP 32 -> 32  SPD 100 -> 0
+3: 巡礼の衣     100 G   HP 96 -> 108  MP 32 -> 48  SPD 100 -> 100
+0: 店を出る
+your command (0-3): 1
+購入しますか (1: 購入 / 2: 戻る): 1
+```
+
+実際の一覧は全未購入商品と購入済み装備変更を連番で表示し、上は先頭3品の抜粋。Gold不足時は理由を表示し、選択状態を維持する。購入確認時に商品ID・在庫・価格・所持金を再検査し、成功時にだけ減算と所有登録を同時に行う。技resolverを流用しない。未所有装備の名前入力・負の価格・任意ステータス入力は受理しない。ローカルメモリー改変の防止までは主張しない。
+
+## 10. 敵10種と技枠候補
+
+敵MPは最大32・初期32、HPとSPDは下表。IDは行順の0〜9。各slotの`/`区切り候補から百分率方式で1個選ぶ。候補が2個なら50/50、単独でも乱数1回消費。slot間の重複は候補表で防ぐ。敵AIは装備された3枠だけを使い、装備されていない名前を選ばない。
+
+| ID / 敵 | HP | SPD | slot0 | slot1 | slot2 |
+|---|---:|---:|---|---|---|
+| 0 IRON HOUND | 36 | 110 | pierce | smash / feint | focus / counter |
+| 1 HEX MAGE | 34 | 80 | fire | flare / purge | healing-rain / siphon |
+| 2 STONE GOLEM | 48 | 40 | smash / bank-shot | quake | focus / healing-rain |
+| 3 ASH WISP | 36 | 120 | fire | flare / feint | healing-rain / siphon |
+| 4 SHADE | 40 | 130 | feint / pierce | purge / smash | counter / siphon |
+| 5 IRON MONK | 44 | 90 | pierce | focus / feint | counter / healing-rain |
+| 6 BONE ARCHER | 42 | 120 | pierce | feint / smash | siphon / counter |
+| 7 FROST WITCH | 42 | 80 | purge | fire / pierce | healing-rain |
+| 8 BLADE DANCER | 54 | 140 | feint | counter / pierce | smash / fire |
+| 9 VOID KNIGHT | 84 | 90 | eclipse | purge / pierce | siphon / healing-rain |
+
+共通AIは次の優先表から、成立しMPが足りる最初の技を選ぶ。同条件に複数slotがあれば小さいslot番号を優先。技を持たない行は飛ばす。
+
+| 優先 | 条件 | 技 |
+|---:|---|---|
+| 0 | Pending発動またはRest | 予約処理（通常AIより先） |
+| 1 | eclipseを持ちMP>=8 | eclipse |
+| 2 | quakeを持ち(R-1)%4=0 | quake |
+| 3 | 自HP<=最大HP/3、rainUsed=false | healing-rain |
+| 4 | 相手Pendingあり | counter |
+| 5 | 相手Focusあり | purge |
+| 6 | 相手Burnあり | flare |
+| 7 | 自MP<=6 | siphon |
+| 8 | 自Focusなし、直前の自分の手動技がfocusでない | focus |
+| 9 | 常時 | slot0→slot1→slot2の順で即時直接ダメージ技を選ぶ |
+| 10 | 常時 | attack |
+
+rainUsedは敵ごとに試合中1回のAI制限。技そのものの使用制限ではなく、プレイヤーはMPがあれば再使用できる。敵の自己回復だけの連打をなくし、雨のターンに自分も6回復することで攻め継続・立て直しの判断を作る。攻撃に付随するdrainはプレイヤー用候補に残すが、敵の抽選枠から外す。
+
+FROST WITCHは名前・氷色の見た目であり、凍結状態は実装しない。VOID KNIGHTはMPがある間eclipseを優先するため、既知の決勝手順を維持する。全技は習得やプレイヤー実行も含め実参照される。
+
+通常敵は2〜5R、決勝は装備により5〜12Rが目標。時間切れを通常攻略の主な敗因にはしない。調整時はHP・コスト・回復量から見直す。
 
 ## 11. 面白さの成立条件
 
@@ -229,7 +388,7 @@ FROST WITCHは名前・氷色の見た目であり、凍結状態は実装しな
 | 構成例 | 遊び方 | 苦手 |
 |---|---|---|
 | fire / flare / mend | Burnを維持して追加威力 | MPを使い切った後の継続火力 |
-| focus / quake / first-aid | 溜めと休息を予告へ合わせる | 相手のpurge、相手のcounter |
+| focus / quake / healing-rain | 溜めと休息を予告へ合わせる | 相手のpurge、相手のcounter |
 | pierce / bank-shot / drain | 防御で蓄積、反撃と吸収 | Bankを貯めるまでの時間 |
 
 次技予告は既存ゲームにもある一般的な判断補助。独自の見せ場は、予告を生む予約データを自分の技へ転用できること、同じ溜め・休息制約が敵味方双方にかかること、そこを解析で説明できることに置く。
@@ -238,7 +397,17 @@ FROST WITCHは名前・氷色の見た目であり、凍結状態は実装しな
 
 入力は最大64バイト相当を有効範囲とし、それ以上は行全体を捨ててエラー。前後のASCII空白を除去、A-Zだけ小文字化。空行は何もしない。装備選択は1/2/3、名前は完全一致。接頭辞の自動実行なし。`? prefix`は装備+基本技だけを検索する。
 
-`skills`で装備・MP・通常効果、`recent`で直近6件、`help`で操作、`quit`で終了。情報表示はAI・乱数・状態・履歴を進めない。EOFはquitと同じ。保存・再開は初版に含めない。
+`skills`は現在装備した3技、`book`は基本技を含む全登録済み技、`status`は能力と装備、`recent`は直近6件、`help`は日本語操作説明を表示する。bookには日本語名・入力名・MP・具体的効果・装備枠番号または未装備を表示し、戦闘中は閲覧のみ。未登録の技名や総未発見数を見せない。習得所の装備変更はbookと同じ一覧を番号で選ぶ。情報表示はAI・乱数・状態・履歴を進めない。
+
+閲覧画面は`back`で開く前の画面と選択状態へ戻る。技名を入力しても閲覧画面から戦闘を実行せず、戻る案内を出す。日本語表示名はattack=通常攻撃、guard=防御、wait=待機、pierce=貫き、smash=強打、fire=火炎、flare=追い炎、drain=吸収、healing-rain=癒しの雨、focus=集中、barrier=魔法障壁、purge=浄化、counter=迎撃、siphon=魔力吸収、mend=手当て、bank-shot=蓄勢撃、quake=地鳴り、eclipse=蝕、feint=牽制、reprise=借り技。未発見技の日本語名も通常一覧には出さない。
+
+`quit`は`終了しますか (1: 終了 / 2: 戻る):`で確認し、空行は戻る。EOFをquitと同一視しない。EOF時は進行を止め、中断記録を保存して`入力が途切れました。進行を保存しました。--resume <file> で再開できます。`と表示して終了する。EOF後に入力を無限再試行しない。
+
+中断ファイルは`arena-suspend-<seed16hex>-<step>.txt`をカレントディレクトリに作り、同名があれば連番を付け既存を上書きしない。保存成功時のみ成功表示。書込み失敗なら保存失敗と現在のseed・受理済みコマンド列を表示し、非ゼロ終了。暗号化や認証はしない。
+
+小規模化のため中断記録は状態の直接シリアライズでなく、版ID・初期seed・run種別・受理済み操作列（ルート/習得/購入/装備確定/戦闘/nextを含む、情報表示は除外）をASCIIで保存する。最大4096操作、1行64byte。再開時は同じ版で各操作を通常validator経由で非表示再生し、1件でも不成立なら再開せずエラー。未確認の購入・quitは記録しないので、直前の確定状態へ戻る。技の所有確認欠落だけは元の仕様どおり。改変不可能な記録ではないが、未知商品IDやGold不足を迂回する別の読込経路は作らない。
+
+操作記録は生のメニュー番号ではなく、`route <node-id>`、`learn <skill-id> <slot>`、`equip-skill <skill-id> <slot>`、`buy <item-id>`、`equip-item <item-id>`、`leave-booth`、`leave-shop`、`use <skill-name>`、`next`へ正規化する。この文法は再生専用で対話入力からは受理しない。IDによる再生でも、その場で表示可能だった選択肢と所有・価格を検査する。装備変更が4096操作に達する前に上限を通知し、追加変更を受理せず中断記録を出す。
 
 履歴は受理・実行したプレイヤーの戦闘コマンドのみ6件。溜め技は開始時に1件。自動発動・休息・next・習得・help・失敗入力は記録しない。戦闘間で保持し、新規runで消去。候補順位は履歴中の最終使用が新しい順、同順位はID順。ただし履歴に含まれる未装備技を候補に追加しない。
 
@@ -449,15 +618,19 @@ GOLD CROWN / palette b:
 
 | 表示モード | 動作 |
 |---|---|
-| `--plain`（既定） | 制御文字なし、ASCIIアート、追記出力。リダイレクトにも使用 |
-| `--color=rgb` | UTF-8ブロック+SGR truecolor。OSCなし。画面をCSI H / CSI 2Jで再描画 |
+| `--plain` | 制御文字なし、ASCIIアート、追記出力。リダイレクトにも使用。説明は日本語UTF-8 |
+| `--color=rgb`（既定） | Windows Terminal向け。UTF-8ブロック+SGR truecolor。OSCなし。画面をCSI H / CSI 2Jで再描画 |
 | `--color=osc` | OSC4+SGR indexed。WT 1.23.11132.0以降を文献上の目安とし、実端末で確認して使う |
 
 標準C++だけでVT有効化やUTF-8端末設定は行えない。対応端末側で有効になっていることを前提とし、失敗時はplainへ明示切替。端末への問い合わせをstdinのゲーム入力と混ぜない。自動検出・自動応答待ちは初版で行わない。
 
-OSC版の通常終了・EOF・quitでは使用した16〜33だけ`ESC]104;n BEL`でリセットしSGR0。全パレットリセットはしない。OSC104は端末の既定色へ戻す動作であり、起動前に他アプリが一時設定した色の完全復元ではない。強制終了時の復元も保証しない。既存パレットを変更したくない利用ではrgb版を使う。
+OSC版の通常終了・EOF・quitでは使用した16〜41だけ`ESC]104;n BEL`でリセットしSGR0。全パレットリセットはしない。OSC104は端末の既定色へ戻す動作であり、起動前に他アプリが一時設定した色の完全復元ではない。強制終了時の復元も保証しない。既存パレットを変更したくない利用ではrgb版を使う。
 
 進捗表示はOSC版で`--progress`を指定した場合のみ、試合後に`ESC]9;4;1;20 BEL`〜`100`、結果画面を閉じるとき`ESC]9;4;0 BEL`。優勝判定そのものはOSC対応と無関係。タイトル変更、クリップボード、通知、外部URL起動、OSC633補完は使用しない。
+
+UI用固定色はpalette34〜41へ追加：34=枠394B65、35=HP/踏破66D19E、36=MP70AFFF、37=SPD/現在地67DDE8、38=Gold/選択FFC857、39=習得/装備C49BFF、40=危険FF637D、41=未到達7F8BA3。背景は0B1020、通常文字はDCE4F2。OSCモードでは34〜41もOSC4で設定し、使用した番号を終了時にOSC104で戻す。画面は空白セルにもSGR背景色を指定し、端末の白背景設定に左右されない。HP25%以下の判定はcurrent*4<=max、0も赤。ゲージ未充填部は34。色変更はユーザーの端末全体の既定背景には適用しない。
+
+通常文字は両色モードともSGR `38;2;220;228;242`を使う。背景はrgb版で`48;2;11;16;32`、OSC版で`48;5;16`。絵の6色を使う箇所とUI色を使う箇所をspanとして分け、各spanに明示的な色を付ける。SGR0の後は必要な背景・文字色を再指定する。
 
 ## 15. 結果・スコア・演出
 
@@ -474,13 +647,39 @@ score = max(0, 10000 - 120*総ラウンド数 - 10*総被ダメージ + 20*最�
 
 ## 16. 小さなC++実装へ落とす構造
 
-将来のファイルは `main.cpp / game.h / battle.cpp / data.cpp / effects.cpp / effects_extra.cpp / ui.cpp` の7個程度。mainは入出力、battleは状態遷移とAI、dataは技・敵・絵、effects2個は処理表、uiは文字列化。テンプレートによるDSL、継承階層、スクリプトVM、動的プラグインは不要。
+将来のファイルは `main.cpp / game.h / lcg.hpp / battle.cpp / data.cpp / effects.cpp / effects_extra.cpp / ui.cpp` の8個程度。mainは入出力と中断操作列、battleは状態遷移とAI/店、dataは技・敵・商品・絵、effects2個は処理表、uiは文字列化。テンプレートによるDSL、継承階層、スクリプトVM、動的プラグインは不要。
 
 必要な概念データはFighter、SkillDef、Effect、Pending、AiRule、RunState、CommandHistory。Fighterは固定長配列と整数中心。動的文字列は入力・出力に限定可能。ゲームロジックと描画ロジックは分離し、ゲーム側は端末シーケンスを知らない。
 
 EffectはDamage / Heal / Apply / Clear / RestoreMP / ConditionalAdd / Drain / SpendBank / Schedule / Borrowの最大10種。Skillは最大3個のEffectを持つ。条件加算はダメージ前の作業値へ適用、Heal/Drain/状態付与はダメージ後。大技はScheduleが予約を作り、発動時は予約の基礎威力でDamageだけ実行する。予約発動でScheduleへ再帰しない。
 
-非キャプチャlambdaを関数ポインタに変換した小さなdispatch tableを2translation unitで構成してよい。AiRuleは最大4行/敵、条件はAlways / HpLE / MpLE / HasStatus / OpponentPending / RoundModulo程度。描画・AIにも同じ仕掛けを大量複製しない。
+非キャプチャlambdaを関数ポインタへ変換するjump tableを必須とする。effects.cppがDamage/Heal/Apply/Clear/RestoreMP、effects_extra.cppがConditionalAdd/Drain/SpendBank/Schedule/Borrowを担当し、battle.cppの表から呼ぶ。巨大switchへ置換しない。AiRuleは10節の共通10行をデータとして保持し、条件も小さなConditionFn表へ対応付ける。
+
+### 16.1 lambdaとjump tableの具体形
+
+宣言は`using EffectFn = void (*)(EffectContext&, const Effect&);`、`Effect { Opcode op; Target target; int arg0; int arg1; }`。EffectContextは使用者/対象への参照、作業基礎値、最後の実減少、捕捉した予約値を保持する。raw byte列のVMは作らない。表の添字はOpcodeの0〜9を使い、範囲外は開始時検査でエラー。
+
+```cpp
+// effects.cpp: example entry; the referenced types live in game.h.
+EffectFn heal_handler() {
+    return +[](EffectContext& c, const Effect& e) {
+        Fighter& t = e.target == Target::Self ? c.user : c.opponent;
+        t.hp = std::min(t.max_hp, t.hp + e.arg0);
+    };
+}
+
+// battle.cpp: each getter returns a non-capturing lambda from its TU.
+const std::array<EffectFn, 10> effect_jump = {
+    damage_handler(), heal_handler(), apply_handler(), clear_handler(),
+    restore_mp_handler(), conditional_add_handler(), drain_handler(),
+    spend_bank_handler(), schedule_handler(), borrow_handler()
+};
+// effect_jump[static_cast<std::size_t>(effect.op)](context, effect);
+```
+
+この断片は接続規約の例で、lcg.hppのコードとは異なり単独コンパイル対象ではない。game.hに型とgetter宣言、利用TUにalgorithm/arrayを含める。Opcodeは上の表順に固定。Prepare→Hit→Afterと構えの振分けはEffectの段階メタデータで行い、同じApplyを二重実行しない。Borrowの捕捉は入力確定時に行うが、Bankの消費と自分Pending生成は自分の行動機会に行う。相手先行で既に発動しても捕捉値は変わらない。
+
+Damageは作業加算値を基礎に加えて7.1節の共通式へ渡す。ScheduleはDamageを呼ばずPendingを作るだけ。翌ラウンドの発動はPendingからDamage handlerへ入り、SkillDefのScheduleを再実行しない。λの数を技20個へ増やさず、技の違いはEffect列と引数に置く。
 
 Release最適化でlambdaや関数境界が統合される可能性がある。Ghidraでlambdaだったことや元のtranslation unitまで判定できるとは主張しない。解析展示用はLTOなし・PDB非同梱を基準とし、実際のバイナリに表と間接呼出しが残るか確認する。残らない場合も難読化を足さず、復元対象の説明を実物へ合わせる。
 
@@ -496,15 +695,17 @@ Wasmアダプターはextern Cの薄い境界だけにして、文字入力と�
 
 同じseed・コマンド列からHP/MP/予約/履歴/結果が一致することを移植条件にする。float、時刻、アドレス値、OS乱数の追加呼出し、標準ライブラリ固有のshuffleに依存しない。ネイティブPEを主解析対象とし、Wasm版は読者が遊ぶための導線。Wasmの逆解析結果がGhidraのPE解析と同じ見え方になるとは約束しない。
 
+seed未指定のWeb版はJavaScriptの`crypto.getRandomValues(new Uint32Array(2))`を1回呼び、hi/loの2個をコアへ渡す。JS Numberへ64bit整数をまとめて精度を落とさない。初期化境界を`init(uint32_t hi,uint32_t lo)`にし、C++内で結合する。以後のLCGはC++で実行。Math.randomへ代替しない。中断は同じ操作列をブラウザーからダウンロード/読込みできる形とし、仮想FSへの書込みだけで永続保存できたと表示しない。
+
 ---
 
-## 付録A：作者・実装者用／非公開技の答え
+## 18. 特殊技と通常攻略の設計
 
-### A1. 特殊技 REPRISE
+### 18.1 特殊技 REPRISE
 
 ID19、入力名`reprise`、表示名REPRISE、MP10。相手が溜めを開始済みで未発動、かつ予約威力が正のときだけ使用可能。自分が溜め中・休息中なら入力不可。
 
-開始時に相手Pendingの基礎威力と属性をコピーし、基礎威力へ自分Bankを加算してBankを0へ。自分Pendingへその値を保存する。相手Pendingは消さない。相手Focus・属性以外の追加状態・過去のダメージ結果はコピーしない。技名をコピーするのではなく、予約データの威力と属性を借りる。
+入力確定時に相手Pendingの基礎威力と属性を捕捉し、自分の行動機会で自分Bankを加算してBankを0へ。自分Pendingへその値を保存する。相手Pendingは消さない。相手Focus・属性以外の追加状態・過去のダメージ結果はコピーしない。技名をコピーするのではなく、予約データの威力と属性を借りる。相手が先行すると、受けた攻撃をGuardしていないので新しいBankは増えず、以前の蓄積だけを使う。
 
 Tで溜め、T+1で発動、T+2で休息する。Focusは自分のものが発動時に適用される。相手が発動・休息へ進んでも取得済み予約は変わらない。REPRISEを相手が予約していても基礎値はコピー可能だが、初版の敵AIはREPRISEを装備・使用しないので再帰的な撃ち合いは起きない。
 
@@ -516,11 +717,13 @@ Tで溜め、T+1で発動、T+2で休息する。Focusは自分のものが発�
 
 1で観察フラグを立て、直後の自分の受理行動がattack以外なら取り消す。2で発見待ちにし、勝利時に`You learned REPRISE: borrow a charging strike.`を表示して登録済み集合へ追加する。その勝利後だけ無料の装備交換を1回提示する。最後の決勝後に初めて成立した場合は発見表示だけで終了し、次周への持ち越しはしない。
 
-STONE GOLEMで早期発見できる。説明文は発見通知と発見後skillsから参照される。開発者専用パスや未参照文字列ではない。ゲーム開始時の短いヒントは`Block the falling weight. Answer the silence.`。通常の訓練助言としてhelpにも表示し、答えの入力名は含めない。
+STONE GOLEMで早期発見できる。初めて敵が溜めに入ったら、戦闘内だけで`相手は力をためている。次の攻撃を防ぐ準備をしよう。`と表示。大技をguardした直後には`相手は休んでいる。通常攻撃で反撃できる。`と表示する。実際に該当する状態で1回だけ出すため、曖昧な英語の謎解きにしない。これらの状況別助言は初見の戦闘を支えるもので、別配布の説明書には秘密技の手順を載せない。
 
-### A2. 解析で導く決勝の90ダメージ
+さらに習得所IIには、未登録ならrepriseの「借り技の実演」を必ず候補に追加する。候補表示時に日本語で効果を開示し、その習得所の1回分を使って通常習得できる。GOLEMを避けても、観察条件を当てなくても入手できる。観察条件で早期取得した人は習得枠を他の技へ回せる。このため解析の報酬は必須の秘密入力ではなく、仕組みの理解・早期利用・組合せの発見となる。
 
-検証用の決勝開始状態：HP96、MP32、focus装備、Bank0、敵HP84/MP32。repriseは登録済み・装備済みでも、付録Bの入力経路でも同じ戦闘処理になる。
+### 18.2 通常プレイでも可能な決勝の90威力
+
+検証用の決勝開始状態：HP96、MP32、SPD100、focus装備、Bank0、敵HP84/MP32/SPD90。これは任意seedの初期状態を主張する例ではなく、条件を明示した戦闘検証例。repriseは正規習得・装備で実行でき、19節の入力経路でも同じ戦闘処理になる。習得所IIの実演と発見後bookから、必要なタイミングを人間が理解できる説明を出す。
 
 | R | 敵予告 | 自分 | ラウンド終了時の要点 |
 |---:|---|---|---|
@@ -535,7 +738,9 @@ STONE GOLEMで早期発見できる。説明文は発見通知と発見後skills
 
 通常プレイの単純な決勝勝利例も成立する。満タン開始・focus装備なら `focus, guard, attack, attack, guard, attack, focus, guard, attack, attack, attack`。敵eclipseを3回guardしてHP24、R3/R9の集中attackが各18、R4/R6/R10/R11の通常attackが各12で合計84。R11は敵の4回目の発動より先に倒す。隠し技は優勝の必須条件ではない。
 
-### A3. 何をGhidra-MCPで復元すると発見になるか
+装備で勝つ経路も置く。鉛の鎧だけなら最大HP196/SPD0、決勝HP196開始から、相手のRELEASEだけguardし、残りはattack。R1/3/4/6/7/9/10の7回×12でR10勝利、被害24×3で残HP124。先手を取れなくても通常技だけで戦える。これは「決勝へそのHPで到達できる」と証明するものではなく、前半からの装備購入と回復経路は21節で別に検証する。
+
+### 18.3 Ghidra-MCPによる発見の評価
 
 | 復元する接続 | 得られる予測 | 画面での検証 |
 |---|---|---|
@@ -547,19 +752,19 @@ STONE GOLEMで早期発見できる。説明文は発見通知と発見後skills
 | resolver→装備チェック欠落 | 習得前に完全名入力できる | 同じ90威力を早期に再現 |
 | result→6件履歴 | 大会全体の使用を覚えていない | 最終入力列で冠が変化 |
 
-解析依頼は最初に「秘密コマンドを探せ」ではなく、「予告と行動実行が同じ情報を使うか、データ参照と呼出し元から説明して」とする。続いて「予約データを読み書きする処理を列挙」「防御で残る値の消費先」「敵の大技を自分が使える可能性と必要なラウンド」を問う。
+最初の解析依頼は`このexeをGhidra-MCPで解析し、ゲームの仕組みと、普通に遊ぶだけでは気付きにくい面白い攻略を探してください。推測と確認できた事実を分けてください。`程度に留める。予約、Bank、コピー、6件履歴、技名を先に教えない。追加依頼も`その仮説を実プレイで確かめる手順を示してください。`とし、発見先を誘導しない。上の表は結果を評価する設計者用の期待項目であり、初回プロンプトへ貼らない。
 
 記事には実バイナリで確認したアドレス・逆コンパイル断片・予測・実プレイ結果を掲載する。本書の想定を実際にGhidra-MCPで確認済みとは書かない。現在の作業では解析ツールやゲーム実装を実行していない。
 
-## 付録B：作者・実装者用／意図した不整合
+## 19. 入力と大会監査の意図した不整合
 
-### B1. 入力経路
+### 19.1 入力経路
 
 番号と補完は装備3枠と基本技だけを見る。一方、完全名resolverは全20種を見る。その後にMP・予約状態・技固有の使用条件を検査するが、装備・登録の所有確認だけが欠ける。したがって未習得repriseでも相手Pendingがなければ実行不可。特殊技の名前を当てるだけで無条件に勝てる設計にはしない。
 
 入力から任意メモリー参照、任意コード実行、コマンドシェル呼出しへは到達させない。意図した欠陥はゲーム内の所有確認と結果監査の2点に限定する。
 
-### B2. 結果監査
+### 19.2 結果監査
 
 決勝勝利時、現在の有効履歴0〜6件のSkillIdがすべて登録済み集合にあるなら金冠。未登録が1件でもあれば銀杯。空の配列領域は検査せず、履歴件数を別に持つ。正式習得は永久登録なので装備交換による誤判定は起きない。
 
@@ -571,11 +776,102 @@ STONE GOLEMで早期発見できる。説明文は発見通知と発見後skills
 
 **決勝終了の順序は、勝利検知→結果監査と報酬を固定→発見通知と登録更新→結果描画。** 決勝で初めて発見した技を、その同じ優勝の監査へ遡及させない。決勝前の習得は従来どおり遡及評価される。これは仕様として固定し、実装順任せにしない。
 
-### B3. 演出への結び付け
+### 19.3 演出への結び付け
 
 金冠の描画は結果のRewardTierからだけ分岐。reprise使用フラグや画面の色設定から決めない。解析者が金色のRGB表だけを見ても正規判定の条件までは分からず、結果生成元を辿る必要がある。paletteと画像は両エンディングで実際に描画する。
 
-## 18. 実装後の受入条件と調整基準
+## 20. GitHub Actions・Windows Clang・exe配布
+
+C++17は言語指定、Clangはそのコンパイラーなので併用する。Windowsの`clang-cl`を第一選択にし、MSVCのリンカー/Windows SDK/標準ライブラリと組み合わせてx64 PEを生成する。ソース側からWindows.hを使う必要はない。ランナーにClangがなければ明示エラーにし、別コンパイラーへ無言で切り替えたり自動インストールしたりしない。
+
+以下は将来の`.github/workflows/windows-clang.yml`へ転記する仕様例。今回はworkflowファイルの作成、Actions実行、exe生成、Release公開は行わない。`--self-test`はデータ参照・LCG既知値・戦闘の境界・購入検査を端末入力なしで検証して成功0/失敗1を返す将来の検査モード。ゲーム中の管理コマンドとしては公開しない。
+
+```yaml
+name: Windows Clang
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile with Clang
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio C++ toolchain is unavailable' }
+          & "$vs\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          $clang = Get-Command clang-cl.exe -ErrorAction SilentlyContinue
+          if (-not $clang) { throw 'clang-cl is unavailable; no automatic installation' }
+          & $clang.Source --version
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          & $clang.Source /nologo /std:c++17 /O2 /EHsc /MT /utf-8 /W4 /clang:-fno-lto main.cpp battle.cpp data.cpp effects.cpp effects_extra.cpp ui.cpp /Fe:dist/void-pit-windows-x64.exe /link /INCREMENTAL:NO /OPT:REF /OPT:NOICF /DEBUG:NONE
+          if ($LASTEXITCODE -ne 0) { throw 'Clang build failed' }
+      - name: Verify
+        shell: pwsh
+        run: |
+          & ./dist/void-pit-windows-x64.exe --self-test --plain
+          if ($LASTEXITCODE -ne 0) { throw 'Verification failed' }
+          Get-FileHash ./dist/void-pit-windows-x64.exe -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: void-pit-windows-x64
+          path: dist/void-pit-windows-x64.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: void-pit-windows-x64
+          path: dist
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const {owner, repo} = context.repo;
+            const tag = context.ref.slice('refs/tags/'.length);
+            const release = await github.rest.repos.createRelease({
+              owner, repo, tag_name: tag, name: tag, draft: true,
+              body: 'Windows x64 / Clang / C++17. See MANUAL-ja.md.'
+            });
+            await github.rest.repos.uploadReleaseAsset({
+              owner, repo, release_id: release.data.id,
+              name: 'void-pit-windows-x64.exe',
+              data: fs.readFileSync('dist/void-pit-windows-x64.exe')
+            });
+```
+
+Clangはコンパイル、リンクはMSVC link.exeを利用する構成。/MTでVCランタイムDLLの別インストールを不要にする。PDBは同梱しない。LTOなし、ICFなしを解析展示版の条件とするが、それでも最適化後の関数配置は実物で確認する。最終採用時にはActions参照を検証したcommit SHAへ固定し、WindowsランナーのClangバージョンと生成exeのSHA256を記事に残す。ここに架空のSHAを記入しない。
+
+タグを付けた版はビルド成功後にexeを添付したdraft Releaseまで作り、公開操作後に読者向けリンクが利用可能になる。既存タグの再実行でcreateReleaseが失敗した場合は既存Releaseを上書きせず、失敗を表示する。通常のbranch/PRではArtifactだけ。Artifactは期限とログイン条件があるため、Qiitaの恒久配布先にはRelease assetを使う。
+
+公開時にREADMEとQiitaへ載せるリンクの確定形式：
+
+- Windows x64 exe：`https://github.com/<OWNER>/<REPO>/releases/latest/download/void-pit-windows-x64.exe`
+- 記事の検証版固定exe：`https://github.com/<OWNER>/<REPO>/releases/download/<TAG>/void-pit-windows-x64.exe`
+- 日本語説明書：`https://github.com/<OWNER>/<REPO>/blob/<TAG>/MANUAL-ja.md`
+- ビルド履歴：`https://github.com/<OWNER>/<REPO>/actions/workflows/windows-clang.yml`
+
+OWNER/REPO/TAGは公開先確定時に実値へ置換する。現時点ではexe未作成なので、これらを実在するダウンロードリンクとして案内しない。記事公開の受入条件は、ログアウトした読者がReleaseのexeを取得し、Windows Terminalから起動できること。
+
+## 21. 実装後の受入条件と調整基準
 
 以下は将来の実装に対する受入仕様。今回テストを実行したという意味ではない。
 
@@ -590,12 +886,51 @@ STONE GOLEMで早期発見できる。説明文は発見通知と発見後skills
 | 履歴 | 未登録1回+正規5回では残る、+正規6回で消える。next連打では消えない |
 | 登録 | 装備から外した正規技が銀杯の原因にならない |
 | 結果順序 | 決勝初習得がその決勝監査を変更しない |
-| 抽選 | seed1の初期3枠、同seed同入力のネイティブ/Wasm一致 |
+| 抽選 | 64bit LCGの既知ベクトル、0<=p<=99、2択49/50・3択33/34/66/67の境界、固定消費回数、ネイティブ/Wasm一致 |
 | 表 | ID0〜19、敵の参照ID、AI slot、Effect count、画像文字の範囲が有効 |
 | 絵 | 原稿16×16、差分座標0〜15、色モードに関係なく輪郭・目・冠が読める |
 | OSC | 指定範囲のみ変更・リセット。非対応でもplainで完走できる |
-| 入力 | EOF、長い行、空白、未知技、MP不足が状態を破壊しない |
+| 入力 | EOFで中断記録、再開が同状態、保存失敗を成功表示しない。長い行・空白・未知技・MP不足は非消費 |
+| 装備 | 価格再検査・未所有拒否・0倍/2倍/+100の順序・店内付替えによる回復稼ぎ防止 |
+| SPD | 同値は自分先、SPD0でも行動、遅いguard有効、先行purgeでFocus解除、先手撃破時の後手消滅 |
+| 雨 | 自分12/相手6、上限処理、敵AI1回のみ、プレイヤーの再使用可能 |
+| 通常取得 | 特殊な観察なしでも習得所IIでrepriseを学べる。初見用状況説明が日本語で出る |
+| UI | 味方HP/MPバー、登録済み一覧、現在地と経路の色/記号、番号選択、日本語help |
 
-バランス確認は初期27構成×8ルートの216組を対象に、正規装備だけで少なくとも1つの優勝手順があることを調べる。未習得名の入力を探索から除く。状態探索はHP/MP/状態/予約/ラウンド上限を含め、回復ループで打ち切りを誤らない。勝てない組があれば技威力より先に試合後回復・敵HPを調整し、解析の核となる予約仕様を変えない。
+初期27構成×8経路だけでは敵配置・技枠が異なる新仕様を網羅しない。既知seed 0/1/最大値、連続seed0〜999と全選択経路で、正規習得と購入だけを使った優勝到達を調べる。乱数から到達しない初期構成も個別の戦闘fixtureで確認する。有限seed試験を全2^64シードの勝利保証とは書かない。
+
+状態探索はHP/MP/SPD/状態/予約/Gold/所有品/登録技/装備/ラウンド上限を含め、特殊技を使わない解も探す。未習得名の入力を探索から除く。各店での購入順・装備確定と最大値回復も扱い、決勝だけの満タン例を通し攻略の証明にしない。勝てない構成が見つかったら試合後回復・商品価格・敵HPから調整し、予約共有の核は保つ。
 
 機械的な到達可能性だけでは面白さは保証できない。初見で「予告が役に立った」「休息へ攻撃を合わせられた」「習得所で交換を迷った」が観察できるか、別途少人数で確認する。初版ではコンテンツ追加より、その3点を優先する。
+
+## 22. 人間向け日本語説明書の原稿
+
+以下を将来の`MANUAL-ja.md`とゲーム内helpへ用途別に転記する。ゲーム内helpではダウンロード手順を除く。公開設計書の技一覧をそのまま説明書に貼らない。大技の名前・取得手順・エンディング種別・監査・隠し入力には触れない。
+
+### はじめ方
+
+Windows用exeをダウンロードし、Windows TerminalのPowerShellで保存したフォルダーを開き、`./void-pit-windows-x64.exe`を実行します。文字が崩れる端末では`./void-pit-windows-x64.exe --plain`を使ってください。新しく始めるたびに対戦相手と技の組合せが変わります。
+
+このゲームは入力してEnterを押すと進みます。素早く入力する必要はありません。矢印キーも使いません。選択肢が`1:`と`2:`なら数字の1または2を入力してください。間違った入力で戦闘が進むことはありません。
+
+### 画面の読み方
+
+HPは体力で、0になると敗退します。MPは技を使う力です。どちらもバーと数字で確認できます。SPDは素早さで、高い側が先に動きます。ORDERのYOUが自分、ENEMYが相手です。同じ素早さなら自分が先です。GOLDは買物に使う所持金です。
+
+NEXTは相手が次にする行動です。その下の日本語説明を読んでから、自分の行動を選んでください。現在地は水色のHERE、通った場所は緑のDONE、選べる道は黄色の数字で示します。色が出ない場合も、この文字で区別できます。
+
+### 戦闘の操作
+
+`1`、`2`、`3`で画面に並んだ技を使います。通常攻撃は`attack`、防御は`guard`、力を回復して待つなら`wait`です。防御はその回の直接攻撃を半分にしてMPを4回復します。待機はMPを6回復しますが防御しません。操作画面にも`通常攻撃: attack / 防御: guard / 待機: wait`を表示します。
+
+迷ったら`skills`で今使える技、`book`で覚えた技全部、`status`で能力と装備を見られます。これらを見ても相手は動きません。戻るときは`back`を入力します。日本語の技説明と必要MPがあるので、英語の技名を暗記する必要はありません。`next`と表示されたときは、画面の案内どおり入力して先へ進めます。
+
+### 技を覚える・買物する
+
+途中の習得所では技を1つ覚え、戦闘で使う3枠のどこに入れるか選べます。一度覚えた技は枠から外しても忘れず、bookに残ります。習得所では覚えた技へ入れ替えられます。
+
+敵を倒すと所持金が増えます。店では防具と装飾品を買えます。購入前にHP・MP・素早さがどう変わるか表示されます。体力が増えても遅くなる装備があるので、変化後の数字を見て選んでください。買わずに所持金を残しても構いません。店を出た時点で装備が確定します。
+
+### 終了・入力が途切れたとき
+
+終了は`quit`を入力し、確認画面で1を選びます。間違って選んだ場合は2で戻れます。入力の終了信号を受けた場合は、そのまま敗退にせず中断記録を保存します。表示されたファイル名で`./void-pit-windows-x64.exe --resume <ファイル名>`を実行すると再開できます。保存失敗と表示された場合は再開ファイルができていないので、画面の案内を残してください。
