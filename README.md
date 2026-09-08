@@ -9,6 +9,10 @@
 
 ## download and play
 
+```
+winget install -e --id Microsoft.VCRedist.2015+.x64
+```
+
 https://nightly.link/DaisukeDaisuke/Arena-cli/workflows/windows-clang/main/void-pit-windows-x64.zip
 
 ## CMake / MinGWビルド
