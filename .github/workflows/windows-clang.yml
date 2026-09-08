@@ -1,0 +1,94 @@
+name: Windows Clang
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ilammy/msvc-dev-cmd@9903b5ddb96b67d8ff27924e76011983224cfee5
+        with:
+          arch: x64
+
+      - name: Locate the installed Clang toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $compilerPaths = @(& where.exe clang-cl.exe)
+          if ($LASTEXITCODE -ne 0 -or $compilerPaths.Count -eq 0) {
+            throw 'clang-cl is unavailable; no automatic installation or compiler fallback'
+          }
+          $compiler = $compilerPaths[0].Trim()
+          & $compiler --version
+          if ($LASTEXITCODE -ne 0) { throw 'Clang version check failed' }
+          "ARENA_CXX=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure and build the Windows exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --preset windows-clang-release "-DCMAKE_CXX_COMPILER=$env:ARENA_CXX"
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
+          cmake --build --preset windows-clang-release
+          if ($LASTEXITCODE -ne 0) { throw 'Clang build failed' }
+
+      - name: Verify and prepare the exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ctest --preset windows-clang-release
+          if ($LASTEXITCODE -ne 0) { throw 'Verification failed' }
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item -LiteralPath build/windows-clang-release/bin/void-pit-windows-x64.exe -Destination dist/
+          Copy-Item -LiteralPath MANUAL-ja.md -Destination dist/
+          $hash = Get-FileHash -LiteralPath dist/void-pit-windows-x64.exe -Algorithm SHA256
+          "$($hash.Hash.ToLowerInvariant())  void-pit-windows-x64.exe" | Set-Content -Path dist/SHA256SUMS.txt -Encoding ascii
+          & $env:ARENA_CXX --version | Set-Content -Path dist/toolchain.txt -Encoding utf8
+          $hash | Format-List
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: void-pit-windows-x64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: void-pit-windows-x64
+          path: dist
+
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const {owner, repo} = context.repo;
+            const tag = context.ref.slice('refs/tags/'.length);
+            const release = await github.rest.repos.createRelease({
+              owner, repo, tag_name: tag, name: tag, draft: true,
+              body: 'Windows x64 / Clang / CMake / C++17. See MANUAL-ja.md.'
+            });
+            for (const name of ['void-pit-windows-x64.exe', 'MANUAL-ja.md', 'SHA256SUMS.txt', 'toolchain.txt']) {
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: release.data.id,
+                name, data: fs.readFileSync(`dist/${name}`)
+              });
+            }

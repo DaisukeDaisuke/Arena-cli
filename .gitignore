@@ -1,2 +1,6 @@
 /.idea
 /osc.txt
+/build/
+/dist/
+/arena-suspend-*.txt
+/cmake-build-debug
