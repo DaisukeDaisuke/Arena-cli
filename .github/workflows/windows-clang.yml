@@ -53,6 +53,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Verification failed' }
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           Copy-Item -LiteralPath build/windows-clang-release/bin/void-pit-windows-x64.exe -Destination dist/
+          Copy-Item -LiteralPath build/windows-clang-release/bin/void-pit-windows-x64.pdb -Destination dist/
           Copy-Item -LiteralPath MANUAL-ja.md -Destination dist/
           $hash = Get-FileHash -LiteralPath dist/void-pit-windows-x64.exe -Algorithm SHA256
           "$($hash.Hash.ToLowerInvariant())  void-pit-windows-x64.exe" | Set-Content -Path dist/SHA256SUMS.txt -Encoding ascii
