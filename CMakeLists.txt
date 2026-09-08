@@ -30,7 +30,7 @@ if(MSVC)
     )
 
     set_property(TARGET void_pit PROPERTY
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
     )
 
     target_link_options(void_pit PRIVATE
