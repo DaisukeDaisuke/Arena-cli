@@ -59,38 +59,27 @@ jobs:
           & $env:ARENA_CXX --version | Set-Content -Path dist/toolchain.txt -Encoding utf8
           $hash | Format-List
 
+      - name: Prepare run.bat
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          [System.Text.Encoding]::RegisterProvider([System.Text.CodePagesEncodingProvider]::Instance)
+          $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+          $sjis = [System.Text.Encoding]::GetEncoding(932)
+
+          $content = [System.IO.File]::ReadAllText('run.bat', $utf8)
+          $content = $content -replace "`r`n|`n|`r", "`r`n"
+
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD 'dist/run.bat'),
+            $content,
+            $sjis
+          )
+
       - uses: actions/upload-artifact@v7
         with:
           name: void-pit-windows-x64
           path: dist/
           if-no-files-found: error
           retention-days: 30
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: void-pit-windows-x64
-          path: dist
-
-      - uses: actions/github-script@v9
-        with:
-          script: |
-            const fs = require('fs');
-            const {owner, repo} = context.repo;
-            const tag = context.ref.slice('refs/tags/'.length);
-            const release = await github.rest.repos.createRelease({
-              owner, repo, tag_name: tag, name: tag, draft: true,
-              body: 'Windows x64 / Clang / CMake / C++17. See MANUAL-ja.md.'
-            });
-            for (const name of ['void-pit-windows-x64.exe', 'MANUAL-ja.md', 'SHA256SUMS.txt', 'toolchain.txt']) {
-              await github.rest.repos.uploadReleaseAsset({
-                owner, repo, release_id: release.data.id,
-                name, data: fs.readFileSync(`dist/${name}`)
-              });
-            }
