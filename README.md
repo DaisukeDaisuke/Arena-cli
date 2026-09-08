@@ -1,8 +1,15 @@
 # VOID PIT: BORROWED CROWN
 
+<img width="707" height="538" alt="image" src="https://github.com/user-attachments/assets/a4f39718-3a5c-42a0-9421-919769d89b9b" />
+
+
 [Astra-1.md](Astra-1.md)に基づくWindows Terminal用コマンド戦闘ゲーム。C++17で実装し、ローカルはGCC／MinGW-w64、本番のGitHub ActionsはClang／MSVC環境でCMakeビルドします。外部ライブラリ・画像・追加パッケージは不要です。
 
 操作方法は[日本語説明書](MANUAL-ja.md)を参照してください。
+
+## download and play
+
+https://nightly.link/DaisukeDaisuke/Arena-cli/workflows/windows-clang/main/void-pit-windows-x64.zip
 
 ## CMake / MinGWビルド
 
