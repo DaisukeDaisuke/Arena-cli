@@ -1,6 +1,8 @@
 name: Windows Clang
 
 on:
+  schedule:
+    - cron: "46 7 10 * *"
   workflow_dispatch:
   push:
     branches: [main]
