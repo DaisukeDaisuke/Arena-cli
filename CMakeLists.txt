@@ -20,12 +20,25 @@ set_target_properties(void_pit PROPERTIES
 )
 
 if(MSVC)
-    target_compile_options(void_pit PRIVATE /W4 /utf-8 /EHsc)
-    set_property(TARGET void_pit PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    target_link_options(void_pit PRIVATE /INCREMENTAL:NO /OPT:NOICF)
+    target_compile_options(void_pit PRIVATE
+            /W4
+            /utf-8
+            /EHsc
+            $<$<CONFIG:Release>:/Zi>
+            $<$<CONFIG:Release>:/O1>
+            $<$<CONFIG:Release>:/Os>
+    )
 
-    target_compile_options(void_pit PRIVATE $<$<CONFIG:Release>:/Zi>)
-    target_link_options(void_pit PRIVATE $<$<CONFIG:Release>:/DEBUG:FULL>)
+    set_property(TARGET void_pit PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+
+    target_link_options(void_pit PRIVATE
+            /INCREMENTAL:NO
+            $<$<CONFIG:Release>:/DEBUG:FULL>
+            $<$<CONFIG:Release>:/OPT:REF>
+            $<$<CONFIG:Release>:/OPT:ICF>
+    )
 
     if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         target_compile_options(void_pit PRIVATE /clang:-fno-lto)
