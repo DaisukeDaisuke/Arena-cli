@@ -3,13 +3,13 @@
   "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
   "configurePresets": [
     {
-      "name": "windows-clang-release",
-      "displayName": "Windows x64 Clang / Release (MSVC environment)",
+      "name": "windows-msvc-release",
+      "displayName": "Windows x64 MSVC / Release",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/windows-clang-release",
+      "binaryDir": "${sourceDir}/build/windows-msvc-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CXX_COMPILER": "clang-cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
         "BUILD_TESTING": "ON"
       }
     },
@@ -33,12 +33,12 @@
     }
   ],
   "buildPresets": [
-    { "name": "windows-clang-release", "configurePreset": "windows-clang-release", "jobs": 4 },
+    { "name": "windows-msvc-release", "configurePreset": "windows-msvc-release", "jobs": 4 },
     { "name": "mingw-release", "configurePreset": "mingw-release", "jobs": 4 },
     { "name": "mingw-debug", "configurePreset": "mingw-debug", "jobs": 4 }
   ],
   "testPresets": [
-    { "name": "windows-clang-release", "configurePreset": "windows-clang-release", "output": { "outputOnFailure": true } },
+    { "name": "windows-msvc-release", "configurePreset": "windows-msvc-release", "output": { "outputOnFailure": true } },
     { "name": "mingw-release", "configurePreset": "mingw-release", "output": { "outputOnFailure": true } },
     { "name": "mingw-debug", "configurePreset": "mingw-debug", "output": { "outputOnFailure": true } }
   ]
