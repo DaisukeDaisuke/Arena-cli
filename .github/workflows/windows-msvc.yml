@@ -1,0 +1,83 @@
+name: Windows MSVC
+
+on:
+  schedule:
+    - cron: "46 7 10 * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ilammy/msvc-dev-cmd@9903b5ddb96b67d8ff27924e76011983224cfee5
+        with:
+          arch: x64
+
+      - name: Locate the installed MSVC toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
+          $version = (Get-Item -LiteralPath $compiler).VersionInfo.FileVersion
+          "MSVC compiler: $compiler ($version)"
+          "ARENA_CXX=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure and build the Windows exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --preset windows-msvc-release "-DCMAKE_CXX_COMPILER=$env:ARENA_CXX"
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
+          cmake --build --preset windows-msvc-release
+          if ($LASTEXITCODE -ne 0) { throw 'MSVC build failed' }
+
+      - name: Verify and prepare the exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ctest --preset windows-msvc-release
+          if ($LASTEXITCODE -ne 0) { throw 'Verification failed' }
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item -LiteralPath build/windows-msvc-release/bin/void-pit-windows-x64.exe -Destination dist/
+          Copy-Item -LiteralPath build/windows-msvc-release/bin/void-pit-windows-x64.pdb -Destination dist/
+          Copy-Item -LiteralPath MANUAL-ja.md -Destination dist/
+          $hash = Get-FileHash -LiteralPath dist/void-pit-windows-x64.exe -Algorithm SHA256
+          "$($hash.Hash.ToLowerInvariant())  void-pit-windows-x64.exe" | Set-Content -Path dist/SHA256SUMS.txt -Encoding ascii
+          $compilerVersion = (Get-Item -LiteralPath $env:ARENA_CXX).VersionInfo.FileVersion
+          "MSVC cl.exe $compilerVersion" | Set-Content -Path dist/toolchain.txt -Encoding utf8
+          $hash | Format-List
+
+      - name: Prepare run.bat
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          [System.Text.Encoding]::RegisterProvider([System.Text.CodePagesEncodingProvider]::Instance)
+          $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
+          $sjis = [System.Text.Encoding]::GetEncoding(932)
+
+          $content = [System.IO.File]::ReadAllText('run.bat', $utf8)
+          $content = $content -replace "`r`n|`n|`r", "`r`n"
+
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD 'dist/run.bat'),
+            $content,
+            $sjis
+          )
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: void-pit-windows-x64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
